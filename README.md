@@ -1,117 +1,225 @@
 # Clinical Simulator
 
-Clinical Simulator is an interactive training platform for hands-on medical practice. It combines guided simulation, real-time AI coaching, and structured post-session review to help learners build clinical confidence through active repetition rather than passive study.
+Clinical Simulator 是一个面向临床训练的交互式练习平台，结合了：
+- **Clinical Interview（问诊训练）**
+- **CPR Training（心肺复苏训练）**
+- AI 驱动的实时反馈
+- 训练后结构化评估
 
-## Training Modules
+项目当前采用 **React/TypeScript 前端 + Python 后端** 的混合架构，并正在持续完成核心业务逻辑的 Python 化。
 
-### Clinical Interview
+---
 
-Practice patient encounters from first question to final diagnosis.
+## 当前项目状态
 
-- **3 patient cases** across easy, medium, and hard difficulty
-- Conduct history-taking via text or voice input
-- AI patient responds naturally based on hidden clinical details, personality traits, and speech patterns
-- Real-time coverage tracking shows how much of the clinical picture has been explored
-- Clinical support tools available during the session: interviewing tips, critical gap alerts, and optional diagnosis reveal
-- Submit a final diagnosis with clinical reasoning
-- Receive a structured evaluation across 6 dimensions:
-  - Information Gathering (25%) — completeness of history, PMH, drug history, social history, review of systems
-  - Clinical Reasoning (25%) — hypothesis-driven questioning and differential diagnosis
-  - Diagnostic Accuracy (20%) — correct diagnosis and clinical understanding
-  - Communication (15%) — empathy, rapport, and patient-centered approach
-  - Efficiency (10%) — information yield per turn, no redundant questions
-  - Safety (5%) — red flag recognition and appropriate urgency
-- Competency levels from Novice to Expert based on weighted score
-- Beginner mode blocks early submission until 40% coverage is reached
+当前仓库是 **Clinical Simulator 的主工作仓库**。
 
-### CPR Training
+它包含：
+- 完整的 React / TypeScript 前端
+- Python 后端迁移代码（`backend-python/`）
+- 根目录 Python 服务入口（`app.py`）
+- 前端构建产物承载方式（`dist/`）
 
-Practice emergency resuscitation with camera-based motion tracking and real-time feedback.
+### Python 化进度
 
-- **3 scenarios** with progressive difficulty:
-  - Hands-Only CPR (Beginner) — continuous compressions, no protocol steps
-  - Adult BLS Sequence (Intermediate) — full 30:2 protocol with scene safety, responsiveness check, 911 call, breathing check, compressions, and rescue breaths
-  - Advanced Emergency Response (Advanced) — 30:2 under pressure with multi-cycle endurance
-- Camera-centric layout: webcam feed occupies the primary view with pose skeleton overlay
-- MediaPipe pose detection tracks 33 body landmarks at 30 fps
-- Compression detection via wrist motion peak analysis with dynamic threshold and debounce
-- BLS phase guidance: step-by-step overlays walk through Scene Safety, Check Response, Call 911, Check Breathing before compressions begin (Intermediate/Advanced only)
-- Ventilation phase: confirm 2 rescue breaths between compression sets in 30:2 mode
-- 2-minute cycle break with rescuer switch prompt and cycle statistics
-- Real-time feedback on the camera overlay: timer, compression count, and coaching instruction bar
-- ActionStatusCard shows live form assessment: hands visible, arms straight, hands centered, full recoil
-- Metronome at 110 BPM and voice coach available during training
-- Post-session evaluation across 7 dimensions:
-  - Rhythm (35%) — compression rate adherence to 100-120 CPM target
-  - Form (25%) — hand visibility, arm straightness, and centering
-  - Depth Proxy (10%) — estimated compression depth from motion amplitude
-  - Recoil (10%) — complete chest return between compressions
-  - Compression Fraction (10%) — active compression time vs. total elapsed
-  - Rate Consistency (5%) — stability of inter-compression timing
-  - Readiness (5%) — BLS checklist completion
+简要状态如下：
+- **Interview 模块**：主流程已基本迁移到 Python 后端
+- **CPR 模块**：目前为混合架构，实时感知留在前端，决策与评估已迁入 Python
 
-## Product Flow
+详细说明见：
+- `PROJECT_PYTHON_MIGRATION_PROGRESS.md`
+- `backend-python/MIGRATION_STATUS.md`
 
-1. **Select** a training module from the home screen
-2. **Brief** — review the scenario, scoring criteria, and setup checklist
-3. **Train** — live simulation with real-time cues and support
-4. **Review** — structured evaluation with score breakdown, strengths, gaps, and next-step recommendations
-5. **Repeat** — retry the same scenario or try a harder one
+---
 
-Session history is saved locally and displayed on the home screen for progress tracking.
+## 功能概览
 
-## Design Principles
+### 1. Clinical Interview
+用于练习临床问诊、病史采集、推理与诊断表达。
 
-- Camera and conversation take center stage — controls stay minimal and peripheral
-- Phase-based progression with clear visual indicators
-- Strong guidance for first-time users, efficient for repeat practice
-- All warnings and confirmations are inline UI elements, not browser dialogs
-- Feedback is specific enough to improve the next attempt
+支持：
+- 多个病例难度层级
+- 文本或语音交互
+- AI 患者自然回复
+- 问诊覆盖度追踪
+- 诊断提交与结构化评分
+- 多维度反馈与能力等级评估
 
-## Who It Is For
+### 2. CPR Training
+用于练习 CPR / BLS 流程与节奏、动作规范。
 
-- Medical students practicing clinical reasoning and patient interaction
-- Healthcare trainees learning BLS/CPR procedural skills
-- Simulation-based training programs looking for scalable practice tools
-- Teams exploring AI-driven, multimodal clinical education
+支持：
+- 多难度 CPR 场景
+- 摄像头姿态识别
+- 压胸计数与节奏跟踪
+- CPR 流程引导
+- 实时动作反馈
+- 训练后评分与建议
 
-## Demo Setup
+---
 
-### Frontend development
+## 项目结构
+
+```text
+.
+├─ src/                            # React / TypeScript 前端
+│  ├─ app/                         # 应用壳层与共享 UI
+│  ├─ modules/interview/           # 问诊模块
+│  ├─ modules/cpr/                 # CPR 模块
+│  └─ platform/                    # 音频、AI、存储、类型等平台层
+├─ backend-python/                 # FastAPI 后端（迁移主目录）
+│  ├─ app/api/                     # API schema 与路由
+│  ├─ app/services/                # 业务服务层
+│  ├─ app/llm/                     # LangChain / LLM 编排层
+│  ├─ tests/                       # 后端测试
+│  ├─ README.md
+│  └─ MIGRATION_STATUS.md
+├─ app.py                          # 根目录 Python 服务入口
+├─ dist/                           # 前端构建产物
+├─ package.json                    # 前端与联调脚本
+├─ requirements.txt                # 根目录 Python 运行依赖
+└─ PROJECT_PYTHON_MIGRATION_PROGRESS.md
+```
+
+---
+
+## 启动方式
+
+项目目前推荐两种启动方式：
+
+## 方式 A：开发模式（前后端分开跑）
+适合本地开发、调试和迭代。
+
+### 1）启动 Python 后端
+```bash
+cd backend-python
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+也可以在仓库根目录直接运行：
+
+```bash
+npm run dev:backend
+```
+
+### 2）启动前端
+在仓库根目录另开一个终端：
 
 ```bash
 npm install
 npm run dev
 ```
 
-### Python backend production-style run
+默认前端开发地址：
+- `http://127.0.0.1:3000`
+- 或 `http://localhost:3000`
 
+---
+
+## 方式 B：生产式运行（前端构建后由 Python 承载）
+适合部署或本地模拟生产环境。
+
+### 1）安装依赖
 ```bash
+npm install
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+```
+
+### 2）构建前端
+```bash
 npm run build
+```
+
+### 3）启动服务
+```bash
 npm start
 ```
 
-This project now uses a Python backend (`app.py`) to replace the original TypeScript server proxy.
+默认由根目录 `app.py` 使用 Uvicorn 提供服务。
 
-Requires a modern browser with webcam access for CPR training. AI features require API keys configured in the settings panel (Gemini or OpenAI), and server-side proxy keys can be provided via `.env`/environment variables.
+如果需要自定义端口：
 
+```bash
+PORT=3000 npm start
+```
 
-## Project status note
+---
 
-This repository is currently the **primary working line** for the Clinical Simulator project.
+## 环境变量
 
-It combines:
-- the full React/TypeScript frontend experience
-- Python backend migration work under `backend-python/`
-- production-style serving through root `app.py`
+### 根目录 Python 服务
+常见依赖：
+- `OPENAI_API_KEY`
+- `GEMINI_API_KEY`
+- `DASHSCOPE_API_KEY`
+- `APP_URL`
+- `RENDER_EXTERNAL_URL`
+- `NODE_ENV`
 
-A separate repo/folder, `Clinical-Simulator-Python`, exists as an earlier Python-first prototype and planning branch. It should not be treated as the mainline project unless explicitly reactivated.
+### `backend-python/` 后端
+请参考：
+- `backend-python/.env.example`
+- `backend-python/README.md`
 
-For a concise consolidation summary, see `PROJECT_WRAPUP.md`.
+常见项包括：
+- `OPENAI_API_KEY`
+- `OPENAI_BASE_URL`
+- `OPENAI_MODEL`
+- `GEMINI_API_KEY`
+- `GEMINI_MODEL`
+- `QWEN_API_KEY`
+- `QWEN_BASE_URL`
+- `LANGCHAIN_MAX_RETRIES`
+- `LANGCHAIN_RETRY_BACKOFF_SECONDS`
+- `LANGSMITH_TRACING`
+- `LANGSMITH_PROJECT`
 
-## Links
-飞书：https://my.feishu.cn/docx/R0DrdkDcqoJnxgx6RlxcudOyn3c?from=from_copylink
-web link: https://clinical-simulator-zrwk.onrender.com/
+---
+
+## 测试
+
+### 后端测试
+```bash
+cd backend-python
+PYTHONPATH=. python3 -m unittest discover -s tests -v
+```
+
+---
+
+## 当前架构说明
+
+### 前端负责
+- UI 与用户交互
+- 摄像头 / 麦克风 / 浏览器语音能力
+- CPR 实时姿态/压胸相关的即时反馈
+- 训练过程展示与结果渲染
+
+### Python 后端负责
+- Interview 主流程业务逻辑
+- AI 网关能力
+- CPR 决策与评估
+- 逐步承接更多核心业务逻辑
+
+---
+
+## 文档说明
+
+当前推荐优先阅读：
+- `PROJECT_PYTHON_MIGRATION_PROGRESS.md`：项目 Python 化进度总览
+- `backend-python/MIGRATION_STATUS.md`：后端迁移状态细节
+- `backend-python/README.md`：后端开发与接口说明
+
+旧的阶段性 plan 文档已不再作为当前主说明。
+
+---
+
+## 相关链接
+
+- Feishu 文档：<https://my.feishu.cn/docx/R0DrdkDcqoJnxgx6RlxcudOyn3c?from=from_copylink>
+- Web Demo：<https://clinical-simulator-zrwk.onrender.com/>
