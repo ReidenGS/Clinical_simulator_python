@@ -1,8 +1,16 @@
 # Dependencies
 node_modules/
+.venv/
 
 # Build output
 dist/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
 
 # Environment variables (NEVER commit real keys)
 .env
