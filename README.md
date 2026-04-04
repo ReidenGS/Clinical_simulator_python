@@ -214,8 +214,10 @@ PYTHONPATH=. python3 -m unittest discover -s tests -v
 - `PROJECT_PYTHON_MIGRATION_PROGRESS.md`：项目 Python 化进度总览
 - `backend-python/MIGRATION_STATUS.md`：后端迁移状态细节
 - `backend-python/README.md`：后端开发与接口说明
+- `docs/architecture/`：架构边界与重构设计文档
+- `docs/interview/`：面试整理文档
 
-旧的阶段性 plan 文档已不再作为当前主说明。
+旧的阶段性 plan 文档已不再作为当前主说明，剩余专题文档已整理到 `docs/` 目录。
 
 ---
 
