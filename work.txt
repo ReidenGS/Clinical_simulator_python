@@ -1,0 +1,352 @@
+Clinical Simulator Main — 当前工作总览（重写版）
+
+项目目录：
+/mnt/d/J_files/Clinical-Simulator-main
+
+最后更新主题：
+- 全项目收尾整理
+- Interview / CPR 迁移状态梳理
+- CPR Phase 2A 实装、联调、收口
+- 下一阶段入口规划
+
+====================================
+一、项目主线判断
+====================================
+
+当前主工作项目：
+- `/mnt/d/J_files/Clinical-Simulator-main`
+
+辅助/早期原型项目：
+- `Clinical-Simulator-Python`
+
+当前结论：
+- 应继续以 `Clinical-Simulator-main` 作为唯一主线推进
+- `Clinical-Simulator-Python` 更适合作为早期 Python-first 原型 / 实验分支参考，不应再作为当前主仓主线开发
+
+已新增/更新的主线定位文档：
+- `PROJECT_WRAPUP.md`
+- `README.md`
+
+====================================
+二、Interview 当前状态
+====================================
+
+当前判断：
+- Interview 核心业务逻辑基本已迁到 Python 后端
+- 前端主要保留 UI、浏览器能力、展示与少量 fallback
+
+已确认 Interview 主路径后端接口：
+- `POST /api/interview/respond`
+- `POST /api/interview/evaluate`
+
+已识别的 Interview legacy 主链候选：
+- `src/modules/interview/orchestration/DialogueOrchestrator.ts`
+- `src/modules/interview/orchestration/DecisionEngine.ts`
+- `src/modules/interview/tracking/SessionStateTracker.ts`
+- `src/modules/interview/tracking/InfoExtractor.ts`
+
+注意：
+以下文件不能直接当 dead code 删除：
+- `src/modules/interview/services/interviewAiService.ts`
+  - 仍承担 legacy fallback
+- `src/modules/interview/tracking/ProgressEngine.ts`
+  - 仍被前端 UI 用于 `criticalGaps` 展示
+- `src/modules/interview/evaluation/RubricEngine.ts`
+- `src/modules/interview/evaluation/FeedbackGenerator.ts`
+  - 更适合后续隔离而不是直接删除
+
+====================================
+三、CPR 当前状态（总体）
+====================================
+
+CPR 已完成：
+- 第一阶段迁移
+- Phase 2A 主体迁移
+- Phase 2A 联调与结构收口
+
+当前 CPR 架构分工：
+
+前端继续负责：
+- pose detection
+- compression analysis
+- observation 生成
+- 实时 UI / 音频 / 浏览器交互
+- 本地 fallback orchestrator（仅保底）
+
+Python 后端当前负责：
+- runtime ingest
+- runtime action
+- state progression
+- phase transition
+- ventilation 确认处理
+- cycle-break resume 处理
+- decision
+- evaluation
+- feedback
+
+====================================
+四、CPR Phase 2A 已完成内容
+====================================
+
+1. 早期阶段（Phase 2A 第一版）
+已实现：
+- `POST /api/cpr/ingest`
+- 后端 `ingest(observation, scenario, state)`
+- 前端 `useCprSession.ts` 先走后端 ingest，失败再本地 fallback
+
+2. action 路径后端化
+已实现：
+- `advancePhase()` → 后端 action 主路径
+- `confirmVentilation()` → 后端 action 主路径
+- `confirmPhaseAdvance()` → 后端 action 主路径
+- 本地 `WorkflowOrchestrator` 降级为 fallback
+
+3. 第二轮联调修补
+已处理：
+- 旧响应覆盖新状态的并发问题
+- ventilation / cycle-break 连续性问题
+- 请求序号保护（避免 stale response 覆盖 authoritative state）
+
+4. runtime 字段分层收口
+已实现：
+- `runtimeState` envelope 接入
+- 将 backend continuation/runtime state 从 `sessionState` 中拆出
+- 前端新增：
+  - `CprRuntimeState`
+  - `CprBackendStateEnvelope`
+- 前端 `useCprSession.ts` 改为使用 `backendStateRef`
+
+5. API 形态整理
+已实现新主路径：
+- `POST /api/cpr/runtime/ingest`
+- `POST /api/cpr/runtime/action`
+
+旧接口当前状态：
+- `POST /api/cpr/ingest` 仍保留
+- 但已明确降级为 compatibility shim / legacy transitional path
+
+6. evaluation 路径
+仍使用：
+- `POST /api/cpr/evaluate`
+
+当前结论：
+- CPR Phase 2A 的核心目标已经基本达成
+- 后端已成为 CPR runtime state machine 的主路径
+
+====================================
+五、CPR Phase 2A 当前文件状态（重点）
+====================================
+
+前端重点文件：
+- `src/modules/cpr/hooks/useCprSession.ts`
+- `src/modules/cpr/types/index.ts`
+
+后端重点文件：
+- `backend-python/app/api/routes.py`
+- `backend-python/app/api/cpr_schemas.py`
+- `backend-python/app/services/cpr_service.py`
+
+收口/规划文档：
+- `CPR_PHASE_2A_PLAN.md`
+- `CPR_PHASE_2A_CLOSURE_PLAN.md`
+- `CPR_PHASE_2A_FINAL_WRAPUP.md`
+- `backend-python/MIGRATION_STATUS.md`
+- `backend-python/README.md`
+
+====================================
+六、CPR Phase 2A 当前判断
+====================================
+
+现在的判断是：
+- Phase 2A 已经可以视为“基本收口完成”
+- 当前最合理的动作，不再是继续无边界扩写结构
+- 而是进入下一阶段：验证、稳定化、去风险
+
+Phase 2A 已完成的关键点：
+- runtime ingest 已后端化
+- runtime action 已后端化
+- evaluate 已后端化
+- runtimeState envelope 已接通
+- 新 runtime API 已成形
+- 前端主路径已切到新 runtime API
+- 旧 `/api/cpr/ingest` 已明确降级为兼容层
+- 文档与代码主线已基本同步
+
+====================================
+七、当前仍未完成、但属刻意保留的内容
+====================================
+
+以下内容目前仍未彻底完成，但这是阶段性保留，不是漏做：
+
+1. fallback 尚未删除
+- 本地 `WorkflowOrchestrator` 仍保留
+- 当前定位：网络/后端失败时的 emergency continuity 机制
+- 之后不应继续给 fallback 增加新业务规则
+
+2. 旧 `/api/cpr/ingest` 尚未退役
+- 当前仅保留为 compatibility shim
+- 删除前需确认没有残余调用方
+
+3. `cpr_service.py` 尚未彻底拆文件
+- 当前 runtime / decision / evaluate 仍在同一文件中
+- 但返回结构已通过 `_build_result(...)` 做了一轮收口
+
+4. 还未完成完整 CPR 验证矩阵
+- 目前代码路径与结构已经到位
+- 但尚缺一轮系统性的验证清单与场景矩阵执行
+
+5. observation 高频场景下的性能/节流策略
+- 还没有进入最终调优阶段
+
+====================================
+八、全项目收尾审计结论（非 CPR）
+====================================
+
+1. 明显低风险清理候选
+- `server.ts.bak`
+- `__pycache__/`
+
+2. 待确认项
+- 根目录 `requirements.txt`
+  - 当前怀疑是旧阶段残留
+  - 但在确认部署链前不建议直接删
+
+3. CPR 本地链路暂不建议删
+以下仍应保留，因为 fallback / hybrid 仍需要：
+- `src/modules/cpr/orchestration/WorkflowOrchestrator.ts`
+- `src/modules/cpr/orchestration/DecisionEngine.ts`
+- `src/modules/cpr/evaluation/RubricEngine.ts`
+- `src/modules/cpr/evaluation/FeedbackGenerator.ts`
+- `src/modules/cpr/tracking/SessionStateTracker.ts`
+- `src/modules/cpr/tracking/ChecklistEngine.ts`
+
+4. CPR 待重点复查文件
+- `src/modules/cpr/tracking/ActionExtractor.ts`
+  - 当前最像未接入 / dead code 候选之一
+  - 正式删除前仍建议再做一次更细引用确认
+
+====================================
+九、当前最推荐的下一阶段
+====================================
+
+建议进入：
+- **CPR Phase 2B — runtime stabilization and de-risking**
+
+当前最优先入口：
+- 创建并执行 CPR 验证清单 / 场景矩阵
+
+建议覆盖场景：
+1. hands-only happy path
+2. conventional 30:2 happy path
+3. ventilation 两次确认后回切 compressions
+4. cycle break 恢复
+5. repeated cycles
+6. backend 失败后的 fallback
+7. runtime 迁移后 evaluate 是否正常
+
+====================================
+十、Phase 2B 当前推进情况
+====================================
+
+已新增文档：
+- `CPR_PHASE_2B_VALIDATION_MATRIX.md`
+
+当前定位：
+- 这是 CPR Phase 2B 的第一份执行型文档
+- 目标是验证 Phase 2A 新 runtime 主路径是否稳定、完整、可继续收口
+
+当前验证矩阵已覆盖：
+- hands-only happy path
+- conventional 30:2 happy path
+- ventilation 两次确认后回切 compressions
+- cycle break 触发与恢复
+- repeated cycles 连续性
+- backend failure fallback
+- runtime 后 evaluate 兼容性
+- stale response / rapid action 并发安全
+- 文档/路径对齐检查
+
+当前矩阵状态：
+- 文档已建立
+- G1（文档主路径对齐）已判定 PASS
+- G2（fallback emergency-only 文档化）当前为 PARTIAL
+- A1-A3（hands-only）已完成代码级预检，当前为 PARTIAL
+- B1-B3（30:2 + ventilation）已完成代码级预检，当前为 PARTIAL
+- C1-C2（cycle break）已完成代码级预检，当前为 PARTIAL
+- D1-D2 / E1-E3 / F1-F2 仍未进入代码级预检或实跑验证
+- 其余运行性测试项当前仍为 NOT RUN，等待后续实际执行
+
+建议后续执行顺序：
+1. A1 → A3（hands-only）
+2. B1 → B3（30:2 + ventilation）
+3. C1 → C2（cycle break）
+4. D1 → D2（repeated cycles + evaluate）
+5. E1 → E3（fallback）
+6. F1 → F2（并发一致性）
+
+====================================
+十一、当前已明确的 CPR 前后端边界
+====================================
+
+已新增文档：
+- `CPR_BACKEND_BOUNDARY.md`
+
+当前已明确的原则：
+
+后端继续负责：
+- CPR runtime rules
+- CPR state machine
+- CPR explicit workflow actions
+- CPR decision / evaluation / feedback
+- runtimeState continuation / runtime envelope
+
+前端继续负责：
+- pose detection
+- compression analysis
+- observation 生成
+- 浏览器 camera / media / UI interaction
+- 实时渲染与交互
+
+当前特别强调：
+- **不应后端化的，不再继续硬迁到后端**
+- fallback 仅保留为 emergency continuity，不作为并行主实现继续膨胀
+
+====================================
+十二、后续建议（按优先级）
+====================================
+
+P1：先执行验证矩阵
+- 按 `CPR_PHASE_2B_VALIDATION_MATRIX.md` 逐项跑
+- 优先验证 runtime 主路径是否在两种 CPR 模式下都稳定
+- 重点盯：ventilation / cycle-break / fallback / evaluate / stale response
+- 当前已完成到：A1-A3 / B1-B3 / C1-C2 的代码级预检
+- 当前仍缺：D1-D2 / E1-E3 / F1-F2 的代码级预检与整套实跑验证
+
+P2：按已明确边界继续推进
+- 该后端化的继续稳定化与收口
+- 不该后端化的（感知/浏览器实时层）保持在前端
+- 不再把 pose/compression raw processing 往后端硬迁
+
+P3：再做兼容层与 fallback 收口
+- 明确旧 `/api/cpr/ingest` 的退役条件
+- 明确 fallback 只作 emergency continuity，不再加新规则
+- 视验证结果决定是否进入兼容层退役准备
+
+P4：最后再考虑 service 进一步拆分
+- 如有必要，把 `cpr_service.py` 再拆成：
+  - runtime helper/service
+  - decision helper/service
+  - evaluation helper/service
+
+====================================
+十三、当前一句话总结
+====================================
+
+当前项目状态可以概括为：
+- `Clinical-Simulator-main` 已确立为唯一主线
+- Interview 核心逻辑已基本后端化
+- CPR 已完成从“前端主导”到“后端主导 runtime”的 Phase 2A 迁移
+- CPR 已进入 Phase 2B，并已建立验证矩阵与前后端边界文档
+- 目前 CPR 从代码结构上已具备可运行条件，主链路已基本接通
+- 但尚未完成整套实跑验证，因此当前更准确的判断是：**可以视为已到可运行状态，但仍需验证以确认稳定正常运行**
+- 现在最合理的下一步，是按既定边界继续执行验证与稳定化，而不是继续无边界改结构
