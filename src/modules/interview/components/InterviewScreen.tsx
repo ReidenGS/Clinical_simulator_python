@@ -3,6 +3,9 @@ import { RefreshCw, Stethoscope } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import type { ModuleScreenProps } from '../../../platform/types';
 import { InterviewStatus } from '../types';
+
+// Legacy evaluation fallback is disabled by default. The Python backend is the primary path.
+const ENABLE_LEGACY_INTERVIEW_EVALUATION = false;
 import type { PatientCase, Assessment, FeedbackReport } from '../types';
 import { loadAllCases } from '../data/CaseRepository';
 import { loadRubricConfig } from '../data/RubricRepository';

@@ -4,6 +4,9 @@ import type { Message, AIConfig } from '../../../platform/types';
 import { SpeechService } from '../../../platform/audio/SpeechService';
 import type { VoiceContext } from '../../../platform/audio/speechSynthesis';
 
+// Legacy fallback is disabled by default. The Python backend is the primary path.
+const ENABLE_LEGACY_INTERVIEW_FALLBACK = false;
+
 type Decision = {
   type: 'CONTINUE' | 'HINT_NEEDED' | 'RISK_BRANCH' | 'PHASE_ADVANCE' | 'EARLY_END_WARNING' | 'RED_FLAG';
   message?: string;
