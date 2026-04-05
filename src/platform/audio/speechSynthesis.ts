@@ -14,6 +14,34 @@ export interface VoiceContext {
   condition?: string; // medical condition for emotion cues
 }
 
+function resolveGender(genderRaw: string | undefined | null): 'female' | 'male' | 'unknown' {
+  const g = (genderRaw || '').trim().toLowerCase();
+  if (!g) return 'unknown';
+
+  const femaleHints = ['female', 'woman', 'girl', 'f'];
+  const maleHints = ['male', 'man', 'boy', 'm'];
+
+  const tokens = g
+    .replace(/[^a-z0-9]+/g, ' ')
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (femaleHints.some((hint) => tokens.includes(hint))) return 'female';
+  if (maleHints.some((hint) => tokens.includes(hint))) return 'male';
+
+  if (g.includes('female') || g.includes('woman')) return 'female';
+  if (g.includes('male') || g.includes('man')) return 'male';
+
+  return 'unknown';
+}
+
+function getGeminiVoiceName(context: VoiceContext): string {
+  const gender = resolveGender(context.gender);
+  if (gender === 'female') return 'Kore';
+  if (gender === 'male') return 'Puck';
+  return 'Kore';
+}
+
 /**
  * Build TTS voice/emotion instructions from context.
  * Used by Qwen3-TTS instruct model for expressive speech.
@@ -105,10 +133,11 @@ export async function generateSpeech(
   voiceContext: VoiceContext
 ): Promise<string | null> {
   try {
-    const isFemale = voiceContext.gender.toLowerCase() === 'female';
+    const gender = resolveGender(voiceContext.gender);
+    const isFemale = gender === 'female';
 
     if (config.speechProvider === AIProvider.GEMINI) {
-      const voiceName = isFemale ? 'Kore' : 'Puck';
+      const voiceName = getGeminiVoiceName(voiceContext);
 
       const response = await fetchWithRetry(() =>
         fetch('/api/proxy/gemini-tts', {
@@ -118,6 +147,7 @@ export async function generateSpeech(
             text,
             voiceName,
             model: config.speechModel || 'gemini-2.5-flash-preview-tts',
+            apiKey: config.speechApiKey || undefined,
           }),
         })
       );
@@ -148,6 +178,7 @@ export async function generateSpeech(
               voice,
               input: text,
             },
+            apiKey: config.speechApiKey || undefined,
           }),
         })
       );
@@ -188,6 +219,7 @@ export async function generateSpeech(
                 instructions,
               },
             },
+            apiKey: config.speechApiKey || undefined,
           }),
         })
       );

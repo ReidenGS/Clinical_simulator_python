@@ -30,10 +30,12 @@ export interface SessionState {
   overallCoverage: number;
   events: SessionEvent[];
   extractions: ExtractedInfo[];
+  ragCaseId?: string | null;
+  ragCaseSummary?: string | null;
 }
 
 export interface SessionEvent {
-  type: 'phase_change' | 'coverage_update' | 'hint_given' | 'red_flag' | 'diagnosis_submitted';
+  type: 'phase_change' | 'coverage_update' | 'hint_given' | 'red_flag' | 'diagnosis_submitted' | 'rag_case_selected';
   turn: number;
   timestamp: number;
   data?: Record<string, unknown>;

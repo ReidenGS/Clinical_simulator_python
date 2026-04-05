@@ -1,4 +1,3 @@
-import { AIProvider } from '../types/app';
 import type { AIConfig } from '../types/app';
 import { generateSpeech, type VoiceContext } from './speechSynthesis';
 
@@ -8,6 +7,7 @@ import { generateSpeech, type VoiceContext } from './speechSynthesis';
  */
 export class SpeechService {
   private config: AIConfig;
+  private cachedNativeVoiceUri: string | null = null;
 
   constructor(config: AIConfig) {
     this.config = config;
@@ -68,19 +68,10 @@ export class SpeechService {
         window.speechSynthesis.cancel();
 
         const utterance = new SpeechSynthesisUtterance(text);
-        
-        // Basic voice selection based on gender/age
         const voices = window.speechSynthesis.getVoices();
-        const isFemale = context.gender.toLowerCase() === 'female';
-        
-        // Try to find a suitable voice
-        const preferredVoice = voices.find(v => 
-          (v.name.toLowerCase().includes(isFemale ? 'female' : 'male') ||
-           v.name.toLowerCase().includes(isFemale ? 'samantha' : 'alex')) &&
-          v.lang.startsWith('en')
-        );
-
-        if (preferredVoice) {
+        const preferredVoice = this.selectNativeVoice(voices, context);
+        if (preferredVoice?.voiceURI) {
+          this.cachedNativeVoiceUri = preferredVoice.voiceURI;
           utterance.voice = preferredVoice;
         }
 
@@ -107,5 +98,60 @@ export class SpeechService {
         speak();
       }
     });
+  }
+
+  private resolveGender(genderRaw: string | undefined | null): 'female' | 'male' | 'unknown' {
+    const g = (genderRaw || '').trim().toLowerCase();
+    if (!g) return 'unknown';
+
+    const tokens = g
+      .replace(/[^a-z0-9]+/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (tokens.includes('female') || tokens.includes('woman') || tokens.includes('girl') || tokens.includes('f')) {
+      return 'female';
+    }
+    if (tokens.includes('male') || tokens.includes('man') || tokens.includes('boy') || tokens.includes('m')) {
+      return 'male';
+    }
+    if (g.includes('female') || g.includes('woman')) return 'female';
+    if (g.includes('male') || g.includes('man')) return 'male';
+    return 'unknown';
+  }
+
+  private selectNativeVoice(voices: SpeechSynthesisVoice[], context: VoiceContext): SpeechSynthesisVoice | null {
+    if (voices.length === 0) return null;
+
+    // Keep the fallback voice stable during a session once selected.
+    if (this.cachedNativeVoiceUri) {
+      const cached = voices.find((v) => v.voiceURI === this.cachedNativeVoiceUri);
+      if (cached) return cached;
+    }
+
+    const gender = this.resolveGender(context.gender);
+    const preferredHints = gender === 'female'
+      ? ['female', 'woman', 'girl', 'samantha', 'victoria']
+      : ['male', 'man', 'boy', 'alex', 'daniel'];
+
+    const englishVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    const pool = englishVoices.length > 0 ? englishVoices : voices;
+
+    const ranked = [...pool].sort((a, b) => {
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+
+      const aScore = preferredHints.some((hint) => aName.includes(hint)) ? 1 : 0;
+      const bScore = preferredHints.some((hint) => bName.includes(hint)) ? 1 : 0;
+      if (aScore !== bScore) return bScore - aScore;
+
+      const aIsLocal = a.localService ? 1 : 0;
+      const bIsLocal = b.localService ? 1 : 0;
+      if (aIsLocal !== bIsLocal) return bIsLocal - aIsLocal;
+
+      return aName.localeCompare(bName);
+    });
+
+    return ranked[0] || null;
   }
 }

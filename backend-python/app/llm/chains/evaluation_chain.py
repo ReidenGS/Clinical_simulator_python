@@ -65,6 +65,7 @@ class InterviewEvaluationChain:
                         'metadata': {
                             'prompt_version': EVALUATION_PROMPT_VERSION,
                             'dimension_id': dim.get('id'),
+                            'rag_active': bool(session_state.get('ragCaseSummary')),
                             'langsmith_enabled': self.settings.langsmith_enabled,
                             'langsmith_project': self.settings.langsmith_project,
                         },

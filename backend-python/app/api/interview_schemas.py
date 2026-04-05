@@ -30,6 +30,7 @@ class PatientCasePayload(BaseModel):
     name: str
     age: int
     gender: str
+    difficulty: Literal['easy', 'medium', 'hard']
     initial_complaint: str = Field(alias='initialComplaint')
     hidden_details: HiddenDetails = Field(alias='hiddenDetails')
     correct_diagnosis: str = Field(alias='correctDiagnosis')
@@ -78,10 +79,12 @@ class SessionStatePayload(BaseModel):
     overall_coverage: int = Field(alias='overallCoverage')
     events: list[SessionEvent] = Field(default_factory=list)
     extractions: list[ExtractedInfo] = Field(default_factory=list)
+    rag_case_id: str | None = Field(default=None, alias='ragCaseId')
+    rag_case_summary: str | None = Field(default=None, alias='ragCaseSummary')
 
 
 class AIConfigPayload(BaseModel):
-    text_provider: Literal['OPENAI', 'GEMINI'] = Field(alias='textProvider')
+    text_provider: Literal['OPENAI', 'GEMINI', 'QWEN'] = Field(alias='textProvider')
     text_api_key: str = Field(default='', alias='textApiKey')
     text_base_url: str | None = Field(default=None, alias='textBaseUrl')
     text_model: str | None = Field(default=None, alias='textModel')

@@ -2,10 +2,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { RefreshCw, Stethoscope } from 'lucide-react';
 import { AnimatePresence } from 'motion/react';
 import type { ModuleScreenProps } from '../../../platform/types';
+import { AIProvider } from '../../../platform/types';
 import { InterviewStatus } from '../types';
-
-// Legacy evaluation fallback is disabled by default. The Python backend is the primary path.
-const ENABLE_LEGACY_INTERVIEW_EVALUATION = false;
 import type { PatientCase, Assessment, FeedbackReport } from '../types';
 import { loadAllCases } from '../data/CaseRepository';
 import { loadRubricConfig } from '../data/RubricRepository';
@@ -22,6 +20,8 @@ import InterviewBrief from './InterviewBrief';
 import InlineConfirm from './InlineConfirm';
 
 const USE_NEW_ORCHESTRATION = true;
+// Legacy evaluation fallback is disabled by default. The Python backend is the primary path.
+const ENABLE_LEGACY_INTERVIEW_EVALUATION = false;
 
 
 export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHandler }: ModuleScreenProps) {
@@ -124,6 +124,9 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
 
     try {
       if (USE_NEW_ORCHESTRATION && session.sessionState) {
+        // All three providers (OPENAI, GEMINI, QWEN) are now supported by the backend.
+        const evaluationConfig = aiConfig;
+
         const rubricConfig = loadRubricConfig();
         const difficultyCases = {
           easy: getCasesByDifficulty('easy'),
@@ -139,13 +142,30 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
             diagnosis,
             caseData: currentCase,
             rubricConfig,
-            config: aiConfig,
+            config: evaluationConfig,
             difficultyCases,
           }),
         });
 
         if (!response.ok) {
-          throw new Error(await response.text());
+          const raw = await response.text();
+          let detail = raw;
+          try {
+            const parsed = JSON.parse(raw) as { detail?: unknown };
+            if (typeof parsed.detail === 'string') {
+              detail = parsed.detail;
+            } else if (Array.isArray(parsed.detail)) {
+              detail = parsed.detail.map(item => {
+                if (item && typeof item === 'object' && 'msg' in item && typeof item.msg === 'string') {
+                  return item.msg;
+                }
+                return String(item);
+              }).join('; ');
+            }
+          } catch {
+            // keep raw text
+          }
+          throw new Error(detail || `HTTP ${response.status}`);
         }
 
         const result = await response.json() as {
@@ -175,6 +195,8 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
       setStatus(InterviewStatus.COMPLETED);
     } catch (error) {
       console.error("Assessment failed:", error);
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setWarningMessage(`Assessment failed: ${message}`);
       setStatus(InterviewStatus.INTERVIEWING);
     }
   };
@@ -234,7 +256,7 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
   // Full-width centered layouts for completed / assessing states
   if (status === InterviewStatus.COMPLETED) {
     return (
-      <div className="lg:col-span-12 flex justify-center">
+      <div className="lg:col-span-12 flex justify-center overflow-y-auto overscroll-contain lg:max-h-[calc(100dvh-9rem)]">
         <div className="w-full max-w-4xl">
           <AssessmentReport
             assessment={assessment}

@@ -87,7 +87,9 @@ class InterviewEvaluateService:
             return 'beginner'
         return 'novice'
 
-    def recommend_next_case(self, result: dict[str, Any], current_difficulty: str, difficulty_cases: dict[str, list[dict[str, Any]]] | None) -> str | None:
+    def recommend_next_case(self, result: dict[str, Any], current_difficulty: str, difficulty_cases: dict[str, list[dict[str, Any]]] | None, current_case_name: str | None = None) -> str | None:
+        if current_difficulty not in {'easy', 'medium', 'hard'}:
+            return None
         score = result['weightedTotal']
         if score >= 75 and current_difficulty == 'easy':
             next_difficulty = 'medium'
@@ -100,7 +102,17 @@ class InterviewEvaluateService:
         else:
             next_difficulty = current_difficulty
         if difficulty_cases and difficulty_cases.get(next_difficulty):
-            return f'Try "{difficulty_cases[next_difficulty][0]["name"]}" ({next_difficulty} difficulty) next.'
+            # Skip the case the student just completed to avoid recommending the same one.
+            candidates = [
+                c for c in difficulty_cases[next_difficulty]
+                if not current_case_name or c.get('name') != current_case_name
+            ]
+            # Fall back to full list if all same-difficulty cases are the current one.
+            if not candidates:
+                candidates = difficulty_cases[next_difficulty]
+            next_case_name = candidates[0].get('name')
+            if next_case_name:
+                return f'Try "{next_case_name}" ({next_difficulty} difficulty) next.'
         return None
 
     def build_summary(self, level: str, score: int, case_data: dict[str, Any]) -> str:
@@ -148,7 +160,7 @@ class InterviewEvaluateService:
             'strengths': strengths,
             'areasForImprovement': areas,
             'specificRecommendations': recommendations,
-            'nextCaseSuggestion': self.recommend_next_case(rubric_result, case_data['difficulty'], difficulty_cases),
+            'nextCaseSuggestion': self.recommend_next_case(rubric_result, case_data.get('difficulty', ''), difficulty_cases, case_data.get('name')),
             'summary': self.build_summary(competency_level, rubric_result['weightedTotal'], case_data),
         }
 

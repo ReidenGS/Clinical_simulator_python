@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
 import time
 from copy import deepcopy
 from typing import Any
+
+from app.services.open_patients_rag import OpenPatientsRagService
 
 ALL_DIMENSIONS = ['HPC', 'PMH', 'DH', 'FH', 'SH', 'ROS', 'ICE', 'COMM']
 
@@ -10,6 +13,8 @@ ALL_DIMENSIONS = ['HPC', 'PMH', 'DH', 'FH', 'SH', 'ROS', 'ICE', 'COMM']
 class InterviewService:
     def __init__(self) -> None:
         self._turn_chain = None
+        self.rag_service = OpenPatientsRagService()
+        self.ai_service = None
 
     @property
     def turn_chain(self):
@@ -37,6 +42,8 @@ class InterviewService:
             'overallCoverage': 0,
             'events': [],
             'extractions': [],
+            'ragCaseId': None,
+            'ragCaseSummary': None,
         }
 
     def add_event(self, state: dict[str, Any], event_type: str, data: dict[str, Any] | None = None) -> None:
@@ -47,6 +54,100 @@ class InterviewService:
             'data': data or {},
         })
 
+    def _normalize_summary(self, text: str, max_chars: int = 900) -> str:
+        return re.sub(r'\s+', ' ', text).strip()[:max_chars]
+
+    def _get_ai_service(self):
+        if self.ai_service is not None:
+            return self.ai_service
+        try:
+            from app.services.ai_service import AIService
+        except Exception:
+            return None
+        self.ai_service = AIService()
+        return self.ai_service
+
+    def _summarize_rag_description(self, description: str, config: dict[str, Any]) -> str | None:
+        compact_description = re.sub(r'\s+', ' ', description).strip()
+        if not compact_description:
+            return None
+        ai_service = self._get_ai_service()
+        if ai_service is None:
+            return None
+
+        system_prompt = (
+            'You are a clinical communication editor. '
+            'Summarize a de-identified patient description into a concise simulation brief for role-play. '
+            'Output plain English only, no markdown, 80-140 words, and include: demographics, chief complaint timeline, '
+            'key associated symptoms, relevant background, and speaking style. '
+            'Preserve uncertainty, do not invent tests, and do not add management advice.'
+        )
+
+        try:
+            summary = ai_service.generate_text(
+                provider=config['textProvider'],
+                system_prompt=system_prompt,
+                messages=[
+                    {
+                        'role': 'user',
+                        'content': f'Description:\n{compact_description[:7000]}',
+                    }
+                ],
+                temperature=0.2,
+                model=config.get('textModel'),
+                api_key=config.get('textApiKey'),
+                base_url=config.get('textBaseUrl'),
+            )
+            normalized = self._normalize_summary(summary)
+            return normalized or None
+        except Exception:
+            return None
+
+    def _ensure_rag_context(self, state: dict[str, Any], config: dict[str, Any]) -> None:
+        if state.get('ragCaseSummary'):
+            return
+
+        rag_case = self.rag_service.sample_case()
+        if not rag_case:
+            return
+
+        model_summary = self._summarize_rag_description(rag_case.description, config)
+        summary = model_summary or rag_case.summary
+        if not summary:
+            return
+
+        state['ragCaseId'] = rag_case.case_id
+        state['ragCaseSummary'] = summary
+        self.add_event(
+            state,
+            'rag_case_selected',
+            {
+                'caseId': rag_case.case_id,
+                'summarySource': 'llm' if model_summary else 'heuristic_fallback',
+            },
+        )
+
+    @staticmethod
+    def _topic_tokens(text: str) -> set[str]:
+        """Return meaningful word tokens from a topic string, ignoring short stop words."""
+        stop = {'of', 'the', 'a', 'an', 'and', 'or', 'in', 'to', 'for', 'with', 'on', 'at', 'is', 'are', 'was'}
+        return {w for w in re.sub(r'[^a-z0-9 ]', '', text.lower()).split() if w not in stop and len(w) > 1}
+
+    def _topic_matches(self, extracted: str, must_ask: str, confidence: float) -> bool:
+        """Return True if extracted topic is a meaningful match for a must-ask item."""
+        if confidence >= 0.7:
+            return True
+        a = self._topic_tokens(extracted)
+        b = self._topic_tokens(must_ask)
+        if not a or not b:
+            return False
+        # Accept if at least one meaningful token is shared and the smaller set overlaps >= 50%
+        overlap = a & b
+        if not overlap:
+            return False
+        smaller = min(len(a), len(b))
+        return len(overlap) / smaller >= 0.5
+
     def update_coverage(self, state: dict[str, Any], case_data: dict[str, Any], extraction: dict[str, Any]) -> bool:
         any_new = False
         for item in extraction.get('topicsCovered', []):
@@ -56,15 +157,13 @@ class InterviewService:
             already_covered = any(existing.lower() == item['subItem'].lower() for existing in dim_coverage['coveredItems'])
             if already_covered:
                 continue
+            confidence = item.get('confidence', 0)
             matches_must_ask = any(
-                must['dimension'] == item['dimension'] and (
-                    item['subItem'].lower().split(' ')[0] in must['subItem'].lower() or
-                    must['subItem'].lower().split(' ')[0] in item['subItem'].lower() or
-                    item.get('confidence', 0) >= 0.7
-                )
+                must['dimension'] == item['dimension'] and
+                self._topic_matches(item['subItem'], must['subItem'], confidence)
                 for must in case_data['mustAskItems']
             )
-            if matches_must_ask or item.get('confidence', 0) >= 0.6:
+            if matches_must_ask or confidence >= 0.6:
                 dim_coverage['coveredItems'].append(item['subItem'])
                 any_new = True
 
@@ -153,15 +252,18 @@ class InterviewService:
         return {'type': 'CONTINUE'}
 
     def process_turn(self, case_data: dict[str, Any], history: list[dict[str, Any]], student_input: str, state: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+        next_state = deepcopy(state) if state else self.create_initial_state(case_data)
+        self._ensure_rag_context(next_state, config)
+
         parsed = self.turn_chain.invoke(
             case_data=case_data,
             history=history,
             student_input=student_input,
             config=config,
+            rag_case_summary=next_state.get('ragCaseSummary'),
         )
         extraction = parsed.extraction.model_dump(by_alias=True) if parsed.extraction else None
 
-        next_state = deepcopy(state) if state else self.create_initial_state(case_data)
         next_state['turnCount'] += 1
         if extraction:
             next_state['extractions'].append(extraction)
