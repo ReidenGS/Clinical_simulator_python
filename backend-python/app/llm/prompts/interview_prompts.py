@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-INTERVIEW_PROMPT_VERSION = 'v2'
+INTERVIEW_PROMPT_VERSION = 'v3-rag'
 
 
 def build_extraction_instruction(case_data: dict) -> str:
@@ -23,7 +23,7 @@ Rules:
 """.strip()
 
 
-def build_patient_turn_prompt(case_data: dict, format_instructions: str):
+def build_patient_turn_prompt(case_data: dict, format_instructions: str, rag_case_summary: str | None = None):
     from langchain_core.prompts import ChatPromptTemplate
 
     family_history = case_data['hiddenDetails'].get('familyHistory')
@@ -31,6 +31,20 @@ def build_patient_turn_prompt(case_data: dict, format_instructions: str):
     review_of_systems = case_data['hiddenDetails'].get('reviewOfSystems')
     personality = case_data.get('personality')
     speech_patterns = case_data.get('speechPatterns') or []
+
+    rag_context = ''
+    if rag_case_summary:
+        rag_context = f"""
+REAL-WORLD REFERENCE (RAG, de-identified):
+- Use this as a realism anchor for symptom expression and chronology:
+  {rag_case_summary}
+- Never copy sentences verbatim.
+- Keep priority order: structured CASE FACTS > diagnosis consistency > RAG reference.
+""".strip()
+
+    # Escape braces in format_instructions so LangChain doesn't treat JSON schema
+    # keys like {"$defs"} as template variables.
+    safe_format_instructions = format_instructions.replace('{', '{{').replace('}', '}}')
 
     system_prompt = f"""
 ROLE: You are simulating a patient named {case_data['name']} ({case_data['age']}y, {case_data['gender']}) for a medical student's training.
@@ -48,6 +62,7 @@ CASE FACTS:
 {f'- Review of Systems: {review_of_systems}' if review_of_systems else ''}
 {f'PERSONALITY: {personality}' if personality else ''}
 {f"SPEECH PATTERNS (use these naturally): {', '.join(speech_patterns)}" if speech_patterns else ''}
+{rag_context}
 
 STRICT GUIDELINES:
 1. DO NOT volunteer hidden details unless explicitly asked.
@@ -60,7 +75,7 @@ STRICT GUIDELINES:
 
 {build_extraction_instruction(case_data)}
 
-{format_instructions}
+{safe_format_instructions}
 """.strip()
 
     return ChatPromptTemplate.from_messages([

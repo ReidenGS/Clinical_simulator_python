@@ -12,6 +12,7 @@ import type {
   CprSessionState,
 } from '../types';
 import type { CprFeedbackSummary } from '../evaluation/FeedbackGenerator';
+import type { AIConfig } from '../../../platform/types';
 
 type BackendCprResult = {
   sessionState: CprSessionState;
@@ -72,6 +73,7 @@ async function applyActionViaBackend(
 async function evaluateViaBackend(
   sessionState: CprSessionState,
   scenario: CprScenario,
+  config?: AIConfig,
 ): Promise<{ evaluation: CprEvaluation; feedback: CprFeedbackSummary }> {
   const response = await fetch('/api/cpr/evaluate', {
     method: 'POST',
@@ -80,6 +82,7 @@ async function evaluateViaBackend(
       sessionState,
       scenario,
       rubric: loadCprRubric(),
+      ...(config ? { config } : {}),
     }),
   });
 
@@ -88,6 +91,18 @@ async function evaluateViaBackend(
   }
 
   return response.json() as Promise<{ evaluation: CprEvaluation; feedback: CprFeedbackSummary }>;
+}
+
+async function prepareGuidelinesViaBackend(config: AIConfig): Promise<void> {
+  const response = await fetch('/api/cpr/guidelines/prepare', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ config }),
+  });
+
+  if (!response.ok) {
+    throw new Error(await response.text());
+  }
 }
 
 interface UseCprSessionResult {
@@ -106,7 +121,7 @@ interface UseCprSessionResult {
   allScenarios: CprScenario[];
 }
 
-export function useCprSession(scenarioId?: string): UseCprSessionResult {
+export function useCprSession(scenarioId?: string, aiConfig?: AIConfig): UseCprSessionResult {
   const scenarioManager = useMemo(() => new ScenarioManager(scenarioId), [scenarioId]);
   const scenario = useMemo(() => scenarioManager.getScenario(), [scenarioManager]);
   const allScenarios = useMemo(() => ScenarioManager.listScenarios(), []);
@@ -154,6 +169,13 @@ export function useCprSession(scenarioId?: string): UseCprSessionResult {
     setVentilationBreathCount(0);
   }, [scenario]);
 
+  useEffect(() => {
+    if (!aiConfig) return;
+    void prepareGuidelinesViaBackend(aiConfig).catch((error) => {
+      console.error('CPR guideline prepare failed:', error);
+    });
+  }, [scenario.id, aiConfig]);
+
   const ingestObservation = useCallback((observation: CprObservation) => {
     const requestId = ++requestSeqRef.current;
     void ingestViaBackend(scenario, backendStateRef.current, observation)
@@ -180,7 +202,7 @@ export function useCprSession(scenarioId?: string): UseCprSessionResult {
     if (!latestState) return;
     setSessionState(latestState);
 
-    void evaluateViaBackend(latestState, scenario)
+    void evaluateViaBackend(latestState, scenario, aiConfig)
       .then((result) => {
         setEvaluation(result.evaluation);
         setFeedback(result.feedback);
@@ -199,7 +221,7 @@ export function useCprSession(scenarioId?: string): UseCprSessionResult {
           evaluation: fallback,
         });
       });
-  }, [scenario]);
+  }, [scenario, aiConfig]);
 
   const resetSession = useCallback(() => {
     orchestratorRef.current.reset();

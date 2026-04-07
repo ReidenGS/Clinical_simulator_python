@@ -1,13 +1,21 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from app.api.schemas import JsonRequest, TextRequest, TtsRequest
-from app.api.interview_schemas import InterviewRespondRequest
+from app.api.interview_schemas import InterviewRespondRequest, AIConfigPayload
 from app.api.interview_evaluate_schemas import InterviewEvaluateRequest
-from app.api.cpr_schemas import CprDecisionRequest, CprEvaluateRequest, CprIngestRequest, CprRuntimeIngestRequest, CprRuntimeActionRequest
+from app.api.cpr_schemas import (
+    CprDecisionRequest,
+    CprEvaluateRequest,
+    CprGuidelinePrepareRequest,
+    CprIngestRequest,
+    CprRuntimeActionRequest,
+    CprRuntimeIngestRequest,
+)
 from app.services.ai_service import AIService
 from app.services.interview_service import InterviewService
 from app.services.interview_evaluate_service import InterviewEvaluateService
+from app.services.case_generator_service import CaseGeneratorService
 from app.services.cpr_service import CprService
 
 
@@ -15,6 +23,7 @@ router = APIRouter(prefix="/api")
 service = AIService()
 interview_service = InterviewService()
 interview_evaluate_service = InterviewEvaluateService()
+case_generator_service = CaseGeneratorService()
 cpr_service = CprService()
 
 
@@ -60,6 +69,24 @@ def interview_respond(payload: InterviewRespondRequest):
             config=payload.config.model_dump(by_alias=True),
         )
         return JSONResponse(content=result)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/interview/case/random")
+def interview_case_random(payload: AIConfigPayload, difficulty: str = Query(default='medium')):
+    if difficulty not in ('easy', 'medium', 'hard'):
+        raise HTTPException(status_code=400, detail="difficulty must be easy, medium, or hard")
+    try:
+        case_data = case_generator_service.generate_random_case(
+            config=payload.model_dump(by_alias=True),
+            difficulty=difficulty,
+        )
+        if case_data is None:
+            raise HTTPException(status_code=503, detail="Could not generate case — dataset unavailable or LLM error")
+        return JSONResponse(content=case_data)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -148,6 +175,17 @@ def cpr_decide(payload: CprDecisionRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/cpr/guidelines/prepare")
+def cpr_guidelines_prepare(payload: CprGuidelinePrepareRequest):
+    try:
+        result = cpr_service.prepare_guidelines(
+            payload.config.model_dump(by_alias=True) if payload.config else None
+        )
+        return JSONResponse(content=result)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/cpr/evaluate")
 def cpr_evaluate(payload: CprEvaluateRequest):
     try:
@@ -155,6 +193,7 @@ def cpr_evaluate(payload: CprEvaluateRequest):
             payload.session_state.model_dump(by_alias=True),
             payload.scenario.model_dump(by_alias=True),
             payload.rubric.model_dump(by_alias=True),
+            payload.config.model_dump(by_alias=True) if payload.config else None,
         )
         return JSONResponse(content=result)
     except Exception as exc:

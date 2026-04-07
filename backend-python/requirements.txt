@@ -9,3 +9,4 @@ langchain==0.3.27
 langchain-core==0.3.74
 langchain-openai==0.3.28
 langchain-google-genai==2.1.9
+datasets==4.1.1

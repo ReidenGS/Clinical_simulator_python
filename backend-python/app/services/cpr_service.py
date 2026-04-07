@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
+from app.services.cpr_guideline_rag import CprGuidelineRagService
 
 PHASE_INSTRUCTIONS = {
     'BRIEFING': 'Review the scenario and press Confirm when ready to begin.',
@@ -62,6 +63,9 @@ def phase_at_or_past(current: str | None, target: str) -> bool:
 
 
 class CprService:
+    def __init__(self) -> None:
+        self.guideline_rag = CprGuidelineRagService()
+
     def _build_result(
         self,
         session_state: dict[str, Any],
@@ -77,6 +81,16 @@ class CprService:
                 'usedFallback': False,
                 'transitionEvents': transition_events or [],
             },
+        }
+
+    def prepare_guidelines(self, config: dict[str, Any] | None = None) -> dict[str, Any]:
+        context = self.guideline_rag.get_guideline_context(config=config)
+        return {
+            'sourceUrl': context.source_url,
+            'sourceTitle': context.source_title,
+            'summary': context.summary,
+            'standards': context.standards,
+            'fetchedAt': context.fetched_at,
         }
 
     def _build_checklist(self, observations: list[dict[str, Any]], current_phase: str, scenario: dict[str, Any]) -> list[dict[str, Any]]:
@@ -411,15 +425,31 @@ class CprService:
             'canEvaluate': state['elapsedSeconds'] >= 10 and any((item.get('compressionRate') or 0) > 0 for item in state.get('observations', [])),
         }
 
-    def evaluate(self, state: dict[str, Any], scenario: dict[str, Any], rubric: dict[str, Any]) -> dict[str, Any]:
+    def evaluate(
+        self,
+        state: dict[str, Any],
+        scenario: dict[str, Any],
+        rubric: dict[str, Any],
+        config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        guideline_context = self.guideline_rag.get_guideline_context(config=config)
+        standards = guideline_context.standards
+
         target = scenario['targetCompressionRate']
+        rate_min = int(standards.get('compression_rate_min', target['min']))
+        rate_max = int(standards.get('compression_rate_max', target['max']))
+        depth_cm_min = float(standards.get('depth_cm_min', 5.0))
+        depth_cm_max = float(standards.get('depth_cm_max', 6.0))
+        compression_fraction_min = float(standards.get('compression_fraction_min', 0.6))
+        defib_guidance = str(standards.get('defibrillation_guidance', '')).strip()
+
         average_rate = state['averageRate']
         if average_rate == 0:
             rate_distance = 100
-        elif average_rate < target['min']:
-            rate_distance = target['min'] - average_rate
-        elif average_rate > target['max']:
-            rate_distance = average_rate - target['max']
+        elif average_rate < rate_min:
+            rate_distance = rate_min - average_rate
+        elif average_rate > rate_max:
+            rate_distance = average_rate - rate_max
         else:
             rate_distance = 0
         rhythm_score = clamp(100 - rate_distance * 3)
@@ -432,16 +462,21 @@ class CprService:
         readiness_score = clamp((len([item for item in checklist if item['completed']]) / max(1, len(checklist))) * 100)
 
         depth_proxy_raw = state.get('depthProxyAverage') or 0
-        if 0.3 <= depth_proxy_raw <= 0.7:
+        depth_proxy_min = max(0.2, (depth_cm_min / 5.0) * 0.3)
+        depth_proxy_max = min(0.9, (depth_cm_max / 5.0) * 0.3)
+
+        if depth_proxy_min <= depth_proxy_raw <= depth_proxy_max:
             depth_proxy_score = 100
-        elif depth_proxy_raw < 0.3:
-            depth_proxy_score = clamp((depth_proxy_raw / 0.3) * 100)
+        elif depth_proxy_raw < depth_proxy_min:
+            depth_proxy_score = clamp((depth_proxy_raw / max(0.05, depth_proxy_min)) * 100)
         else:
-            depth_proxy_score = clamp(100 - ((depth_proxy_raw - 0.7) / 0.3) * 40)
+            depth_proxy_score = clamp(100 - ((depth_proxy_raw - depth_proxy_max) / max(0.05, 1 - depth_proxy_max)) * 40)
 
         recoil_score = clamp((state.get('recoilRatio') or 0) * 100)
         cf_raw = state.get('compressionFraction') or 0
-        compression_fraction_score = clamp(100 if cf_raw >= 0.6 else (cf_raw / 0.6) * 100)
+        compression_fraction_score = clamp(
+            100 if cf_raw >= compression_fraction_min else (cf_raw / max(0.1, compression_fraction_min)) * 100
+        )
         rate_consistency_score = clamp(state.get('rateConsistency') or 100)
 
         weights = rubric['weights']
@@ -468,10 +503,10 @@ class CprService:
         gaps = []
         next_steps = []
 
-        if 100 <= average_rate <= 120:
-            strengths.append('Compression cadence stayed within the AHA-recommended 100-120 CPM range.')
+        if rate_min <= average_rate <= rate_max:
+            strengths.append(f'Compression cadence stayed within the guideline {rate_min}-{rate_max} CPM range.')
         else:
-            gaps.append('Compression cadence did not stay in the 100-120 CPM target window (AHA guideline).')
+            gaps.append(f'Compression cadence did not stay in the target {rate_min}-{rate_max} CPM window.')
             next_steps.append('Use the metronome and stabilize your tempo before increasing force.')
 
         thresholds = rubric['thresholds']
@@ -492,7 +527,7 @@ class CprService:
             next_steps.append('Reposition the camera so shoulders, elbows, and wrists stay in frame.')
 
         if depth_proxy_score < 70:
-            gaps.append('Compressions appear too shallow. AHA recommends at least 2 inches (5 cm) depth.')
+            gaps.append(f'Compressions appear too shallow. Guideline depth target is approximately {depth_cm_min:.1f}-{depth_cm_max:.1f} cm.')
             next_steps.append('Push harder with locked elbows, using body weight rather than arm strength.')
         elif depth_proxy_score >= 90:
             strengths.append('Compression depth proxy is within the adequate range.')
@@ -504,10 +539,10 @@ class CprService:
             strengths.append('Good chest recoil between compressions.')
 
         if compression_fraction_score < 70 and state['elapsedSeconds'] > 10:
-            gaps.append('Compression fraction is below the AHA-recommended 60% threshold.')
+            gaps.append(f'Compression fraction is below the recommended {round(compression_fraction_min * 100)}% threshold.')
             next_steps.append('Minimize interruptions and pauses during CPR.')
         elif compression_fraction_score >= 80:
-            strengths.append('Compression fraction is above the AHA-recommended 60% minimum.')
+            strengths.append(f'Compression fraction is above the recommended {round(compression_fraction_min * 100)}% minimum.')
 
         if rate_consistency_score < 60:
             gaps.append('Compression rate was inconsistent — timing varied significantly.')
@@ -530,6 +565,8 @@ class CprService:
             strengths.append('You completed a full tracked CPR repetition set.')
         if not next_steps:
             next_steps.append('Repeat the drill for 30 seconds and aim to keep both rhythm and form green throughout.')
+        if defib_guidance:
+            next_steps.append(f'Defibrillation strategy reminder: {defib_guidance}')
 
         evaluation = {
             'totalScore': total_score,
@@ -563,11 +600,11 @@ class CprService:
 
         breakdown = evaluation['breakdown']
         dimensions = [
-            ('Rhythm', breakdown['rhythm'], 'AHA recommends 100-120 compressions per minute. Practice with a metronome set to 110 BPM.'),
+            ('Rhythm', breakdown['rhythm'], f'Guideline target is {rate_min}-{rate_max} compressions per minute. Practice with a metronome near the middle of this range.'),
             ('Form', breakdown['form'], 'Focus on locking elbows, centering hands over the sternum, and keeping shoulders stacked over hands.'),
-            ('Depth', breakdown.get('depthProxy', 100), 'AHA recommends at least 2 inches (5 cm) of compression depth. Use body weight, not arm strength.'),
+            ('Depth', breakdown.get('depthProxy', 100), f'Guideline depth target is approximately {depth_cm_min:.1f}-{depth_cm_max:.1f} cm. Use body weight, not arm strength.'),
             ('Recoil', breakdown.get('recoil', 100), 'Allow complete chest recoil between compressions. Lift your hands slightly to avoid leaning.'),
-            ('Compression Fraction', breakdown.get('compressionFraction', 100), 'AHA recommends minimizing pauses to keep compression fraction above 60%.'),
+            ('Compression Fraction', breakdown.get('compressionFraction', 100), f'Minimize pauses to keep compression fraction above {round(compression_fraction_min * 100)}%.'),
             ('Rate Consistency', breakdown.get('rateConsistency', 100), 'A steady rhythm is more effective than varying speed. Use a metronome for pacing.'),
         ]
         weakest = min(dimensions, key=lambda item: item[1])
@@ -596,6 +633,9 @@ class CprService:
             'evaluation': evaluation,
             'cycleComparison': cycle_comparison,
             'focusArea': focus_area,
+            'guidelineSummary': guideline_context.summary,
+            'guidelineSource': guideline_context.source_url,
+            'guidelineTitle': guideline_context.source_title,
         }
         return {
             'evaluation': evaluation,

@@ -47,8 +47,13 @@ class InterviewTurnChain:
         history: list[dict[str, str]],
         student_input: str,
         config: dict,
+        rag_case_summary: str | None = None,
     ) -> 'PatientTurnOutput':
-        prompt = build_patient_turn_prompt(case_data, self.parser.get_format_instructions())
+        prompt = build_patient_turn_prompt(
+            case_data,
+            self.parser.get_format_instructions(),
+            rag_case_summary=rag_case_summary,
+        )
         model = self.factory.build_chat_model(
             provider=config['textProvider'],
             temperature=0.4,

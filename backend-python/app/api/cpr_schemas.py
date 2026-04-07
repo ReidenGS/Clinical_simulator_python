@@ -99,6 +99,13 @@ class CprRubricPayload(BaseModel):
     thresholds: dict
 
 
+class AIConfigPayload(BaseModel):
+    text_provider: Literal['OPENAI', 'GEMINI'] = Field(alias='textProvider')
+    text_api_key: str = Field(default='', alias='textApiKey')
+    text_base_url: str | None = Field(default=None, alias='textBaseUrl')
+    text_model: str | None = Field(default=None, alias='textModel')
+
+
 class CprDecisionRequest(BaseModel):
     session_state: CprSessionStatePayload = Field(alias='sessionState')
 
@@ -107,6 +114,11 @@ class CprEvaluateRequest(BaseModel):
     session_state: CprSessionStatePayload = Field(alias='sessionState')
     scenario: CprScenarioPayload
     rubric: CprRubricPayload
+    config: AIConfigPayload | None = None
+
+
+class CprGuidelinePrepareRequest(BaseModel):
+    config: AIConfigPayload | None = None
 
 
 class CprRuntimeIngestRequest(BaseModel):
