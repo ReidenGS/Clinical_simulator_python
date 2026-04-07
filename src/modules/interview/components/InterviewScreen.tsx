@@ -38,6 +38,7 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
   const [pendingSubmit, setPendingSubmit] = useState(false);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [isGeneratingCase, setIsGeneratingCase] = useState(false);
 
   const { isListening, transcript, isSupported, toggleListening, clearTranscript } = useSpeechRecognition();
   const session = useInterviewSession();
@@ -63,6 +64,32 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
   const handleSelectCase = (patientCase: PatientCase) => {
     setCurrentCase(patientCase);
     setShowBrief(true);
+  };
+
+  const handleGenerateRandom = async (difficulty: 'easy' | 'medium' | 'hard') => {
+    setIsGeneratingCase(true);
+    setWarningMessage(null);
+    try {
+      const response = await fetch('/api/interview/case/random?difficulty=' + difficulty, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiConfig),
+      });
+      if (!response.ok) {
+        const raw = await response.text();
+        let detail = raw;
+        try { detail = (JSON.parse(raw) as { detail?: string }).detail ?? raw; } catch { /* ignore */ }
+        throw new Error(detail);
+      }
+      const caseData = await response.json() as PatientCase;
+      setCurrentCase(caseData);
+      setShowBrief(true);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unknown error';
+      setWarningMessage(`Failed to generate case: ${msg}`);
+    } finally {
+      setIsGeneratingCase(false);
+    }
   };
 
   const handleStartFromBrief = () => {
@@ -247,8 +274,19 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
 
   if (status === InterviewStatus.IDLE) {
     return (
-      <div className="lg:col-span-12 flex items-start justify-center py-2 lg:py-6">
-        <CaseSelector cases={allCases} onSelectCase={handleSelectCase} />
+      <div className="lg:col-span-12 flex flex-col items-center gap-3 py-2 lg:py-6">
+        {warningMessage && (
+          <div className="w-full max-w-5xl rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 flex items-center justify-between gap-3">
+            <span>{warningMessage}</span>
+            <button onClick={() => setWarningMessage(null)} className="text-red-500 hover:text-red-700 font-bold text-xs uppercase tracking-wide shrink-0">Dismiss</button>
+          </div>
+        )}
+        <CaseSelector
+          cases={allCases}
+          onSelectCase={handleSelectCase}
+          onGenerateRandom={handleGenerateRandom}
+          isGenerating={isGeneratingCase}
+        />
       </div>
     );
   }

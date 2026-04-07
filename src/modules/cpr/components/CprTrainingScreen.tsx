@@ -34,7 +34,7 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-export default function CprTrainingScreen({ onBack, registerGlobalBackHandler }: ModuleScreenProps) {
+export default function CprTrainingScreen({ aiConfig, onBack, registerGlobalBackHandler }: ModuleScreenProps) {
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | undefined>(undefined);
   const {
     scenario, sessionState, lastDecision, evaluation, feedback,
@@ -42,7 +42,7 @@ export default function CprTrainingScreen({ onBack, registerGlobalBackHandler }:
     ingestObservation, finalizeSession, resetSession,
     advancePhase, confirmVentilation, confirmPhaseAdvance,
     allScenarios,
-  } = useCprSession(selectedScenarioId);
+  } = useCprSession(selectedScenarioId, aiConfig);
 
   const { videoRef, canvasRef, isModelLoaded, isStreaming, landmarks, cameraError, startCamera, stopCamera } = usePoseDetection();
   const { observation, wristHistory, peakTimestamps, processLandmarks, reset: resetAnalysis } = useCompressionAnalysis();
@@ -186,7 +186,7 @@ export default function CprTrainingScreen({ onBack, registerGlobalBackHandler }:
     <>
       {/* ===== EVALUATION: full-width centered ===== */}
       {showCompleted && (
-        <div className="lg:col-span-12 flex justify-center">
+        <div className="lg:col-span-12 flex justify-center overflow-y-auto overscroll-contain max-h-[calc(100dvh-7rem)]">
           <div className="w-full max-w-4xl">
             <EvaluationReport
               evaluation={evaluation!}

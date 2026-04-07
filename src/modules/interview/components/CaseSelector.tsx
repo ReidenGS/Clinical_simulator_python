@@ -1,11 +1,13 @@
-import React from 'react';
-import { ChevronRight } from 'lucide-react';
+import React, { useState } from 'react';
+import { ChevronRight, Shuffle, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { PatientCase } from '../types';
 
 interface CaseSelectorProps {
   cases: PatientCase[];
   onSelectCase: (c: PatientCase) => void;
+  onGenerateRandom: (difficulty: 'easy' | 'medium' | 'hard') => Promise<void>;
+  isGenerating: boolean;
 }
 
 const DIFFICULTY_META: Record<string, { label: string; focusTitle: string; description: string; helper: string; color: string; border: string; hoverBorder: string; dot: string }> = {
@@ -41,7 +43,15 @@ const DIFFICULTY_META: Record<string, { label: string; focusTitle: string; descr
   },
 };
 
-export default function CaseSelector({ cases, onSelectCase }: CaseSelectorProps) {
+const RANDOM_DIFFICULTY_OPTIONS: { value: 'easy' | 'medium' | 'hard'; label: string; color: string; dot: string }[] = [
+  { value: 'easy', label: 'Easy', color: 'text-emerald-700', dot: 'bg-emerald-500' },
+  { value: 'medium', label: 'Medium', color: 'text-amber-700', dot: 'bg-amber-500' },
+  { value: 'hard', label: 'Hard', color: 'text-red-700', dot: 'bg-red-500' },
+];
+
+export default function CaseSelector({ cases, onSelectCase, onGenerateRandom, isGenerating }: CaseSelectorProps) {
+  const [selectedDifficulty, setSelectedDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+
   const order = ['easy', 'medium', 'hard'];
   const sorted = [...cases].sort(
     (a, b) => order.indexOf(a.difficulty) - order.indexOf(b.difficulty),
@@ -103,6 +113,64 @@ export default function CaseSelector({ cases, onSelectCase }: CaseSelectorProps)
             </motion.button>
           );
         })}
+      </div>
+
+      {/* Random Case Section */}
+      <div className="border-t border-[#141414]/10 pt-6 space-y-4">
+        <div className="flex flex-col gap-1">
+          <p className="text-[10px] font-mono uppercase tracking-[0.22em] opacity-45">Real-World Cases</p>
+          <h3 className="text-xl font-bold uppercase tracking-tight font-display">Generate a Random Case</h3>
+          <p className="text-sm leading-relaxed opacity-65">
+            Drawn from 180,000+ real patient records (Open-Patients dataset). Each case is unique and AI-generated.
+          </p>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+          {/* Difficulty selector */}
+          <div className="flex items-center gap-1 rounded-xl border border-[#141414]/15 bg-[#141414]/[0.02] p-1">
+            {RANDOM_DIFFICULTY_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                onClick={() => setSelectedDifficulty(opt.value)}
+                disabled={isGenerating}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] transition-all duration-150 ${
+                  selectedDifficulty === opt.value
+                    ? `bg-white border border-[#141414]/20 shadow-sm ${opt.color}`
+                    : 'opacity-40 hover:opacity-70'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${opt.dot} shrink-0`} />
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Generate button */}
+          <motion.button
+            whileTap={{ scale: 0.97 }}
+            onClick={() => onGenerateRandom(selectedDifficulty)}
+            disabled={isGenerating}
+            className="inline-flex items-center gap-2 rounded-xl border-2 border-[#141414] bg-[#141414] text-white px-5 py-2.5 text-sm font-bold uppercase tracking-[0.12em] hover:bg-white hover:text-[#141414] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed shadow-[3px_3px_0px_0px_rgba(20,20,20,0.3)] hover:shadow-none"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <Shuffle className="w-4 h-4" />
+                Generate Case
+              </>
+            )}
+          </motion.button>
+
+          {isGenerating && (
+            <p className="text-xs opacity-50 font-mono">
+              Sampling from dataset and generating case structure...
+            </p>
+          )}
+        </div>
       </div>
     </motion.div>
   );
