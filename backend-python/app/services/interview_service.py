@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import re
 import time
+import uuid
 from copy import deepcopy
+from pathlib import Path
 from typing import Any
 
 from app.services.open_patients_rag import OpenPatientsRagService
+
+_SUMMARY_DIR = Path('/tmp/clinical_simulator/summaries')
 
 ALL_DIMENSIONS = ['HPC', 'PMH', 'DH', 'FH', 'SH', 'ROS', 'ICE', 'COMM']
 
@@ -47,7 +51,7 @@ class InterviewService:
             'extractions': [],
             'ragCaseId': None,
             'ragCaseSummary': None,
-            'conversationSummary': None,
+            'sessionId': str(uuid.uuid4()),
         }
 
     def add_event(self, state: dict[str, Any], event_type: str, data: dict[str, Any] | None = None) -> None:
@@ -107,24 +111,44 @@ class InterviewService:
         except Exception:
             return None
 
-    def _generate_conversation_summary(
+    # ── File-based summary storage ──────────────────────────────────────────
+
+    @staticmethod
+    def _summary_path(session_id: str) -> Path:
+        return _SUMMARY_DIR / f'{session_id}.txt'
+
+    @staticmethod
+    def _read_summary(session_id: str) -> str | None:
+        try:
+            path = InterviewService._summary_path(session_id)
+            return path.read_text(encoding='utf-8').strip() or None
+        except FileNotFoundError:
+            return None
+
+    @staticmethod
+    def _write_summary(session_id: str, summary: str) -> None:
+        _SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+        InterviewService._summary_path(session_id).write_text(summary, encoding='utf-8')
+
+    def _refresh_summary(
         self,
+        session_id: str,
         history: list[dict[str, Any]],
-        prev_summary: str | None,
         config: dict[str, Any],
-    ) -> str | None:
+    ) -> None:
+        """Generate an updated summary from full history and persist to file."""
         if not history:
-            return prev_summary
+            return
 
         ai_service = self._get_ai_service()
         if ai_service is None:
-            return prev_summary
+            return
 
+        prev_summary = self._read_summary(session_id)
         turns_text = '\n'.join(
             f"{'Student' if m['role'] == 'student' else 'Patient'}: {m['text']}"
             for m in history
         )
-
         prev_block = f'Previous summary:\n{prev_summary}\n\n' if prev_summary else ''
         system_prompt = (
             'You are a clinical conversation summariser. '
@@ -148,9 +172,10 @@ class InterviewService:
                 base_url=config.get('textBaseUrl'),
             )
             normalized = self._normalize_summary(result, max_chars=1200)
-            return normalized or prev_summary
+            if normalized:
+                self._write_summary(session_id, normalized)
         except Exception:
-            return prev_summary
+            pass  # keep existing file content on failure
 
     def _ensure_rag_context(self, state: dict[str, Any], config: dict[str, Any]) -> None:
         if state.get('ragCaseSummary'):
@@ -304,7 +329,10 @@ class InterviewService:
         next_state = deepcopy(state) if state else self.create_initial_state(case_data)
         self._ensure_rag_context(next_state, config)
 
-        # ── Memory: pass only recent window; summary covers earlier turns ──
+        session_id = next_state.get('sessionId') or ''
+
+        # ── Memory: read summary from file; pass only recent window to LLM ──
+        conversation_summary = self._read_summary(session_id) if session_id else None
         recent_history = history[-RECENT_WINDOW:] if len(history) > RECENT_WINDOW else history
 
         parsed = self.turn_chain.invoke(
@@ -313,7 +341,7 @@ class InterviewService:
             student_input=student_input,
             config=config,
             rag_case_summary=next_state.get('ragCaseSummary'),
-            conversation_summary=next_state.get('conversationSummary'),
+            conversation_summary=conversation_summary,
         )
         extraction = parsed.extraction.model_dump(by_alias=True) if parsed.extraction else None
 
@@ -327,13 +355,9 @@ class InterviewService:
         self.check_phase_transition(next_state)
         decision = self.evaluate_decision(next_state, case_data)
 
-        # ── Memory: regenerate summary every SUMMARY_INTERVAL turns ──
-        if next_state['turnCount'] % SUMMARY_INTERVAL == 0 and history:
-            next_state['conversationSummary'] = self._generate_conversation_summary(
-                history=history,
-                prev_summary=next_state.get('conversationSummary'),
-                config=config,
-            )
+        # ── Memory: persist refreshed summary to file every SUMMARY_INTERVAL turns ──
+        if session_id and next_state['turnCount'] % SUMMARY_INTERVAL == 0 and history:
+            self._refresh_summary(session_id, history, config)
 
         return {
             'patientMessage': {
