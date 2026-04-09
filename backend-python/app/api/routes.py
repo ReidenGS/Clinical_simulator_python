@@ -73,6 +73,16 @@ def interview_respond(payload: InterviewRespondRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.delete("/interview/session/{session_id}")
+def interview_session_delete(session_id: str):
+    """Delete the summary file associated with a session. Call when the user deletes a history entry."""
+    try:
+        interview_service.delete_session_summary(session_id)
+        return {"deleted": session_id}
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.post("/interview/case/random")
 def interview_case_random(payload: AIConfigPayload, difficulty: str = Query(default='medium')):
     if difficulty not in ('easy', 'medium', 'hard'):

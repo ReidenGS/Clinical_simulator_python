@@ -130,6 +130,14 @@ class InterviewService:
         _SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
         InterviewService._summary_path(session_id).write_text(summary, encoding='utf-8')
 
+    @staticmethod
+    def delete_session_summary(session_id: str) -> None:
+        """Remove the summary file for a session. Safe to call even if the file doesn't exist."""
+        try:
+            InterviewService._summary_path(session_id).unlink(missing_ok=True)
+        except Exception:
+            pass
+
     def _refresh_summary(
         self,
         session_id: str,
