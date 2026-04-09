@@ -81,6 +81,7 @@ class SessionStatePayload(BaseModel):
     extractions: list[ExtractedInfo] = Field(default_factory=list)
     rag_case_id: str | None = Field(default=None, alias='ragCaseId')
     rag_case_summary: str | None = Field(default=None, alias='ragCaseSummary')
+    conversation_summary: str | None = Field(default=None, alias='conversationSummary')
 
 
 class AIConfigPayload(BaseModel):

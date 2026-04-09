@@ -9,6 +9,9 @@ from app.services.open_patients_rag import OpenPatientsRagService
 
 ALL_DIMENSIONS = ['HPC', 'PMH', 'DH', 'FH', 'SH', 'ROS', 'ICE', 'COMM']
 
+SUMMARY_INTERVAL = 5   # regenerate conversation summary every N turns
+RECENT_WINDOW = 6      # number of recent turns passed raw to the LLM
+
 
 class InterviewService:
     def __init__(self) -> None:
@@ -44,6 +47,7 @@ class InterviewService:
             'extractions': [],
             'ragCaseId': None,
             'ragCaseSummary': None,
+            'conversationSummary': None,
         }
 
     def add_event(self, state: dict[str, Any], event_type: str, data: dict[str, Any] | None = None) -> None:
@@ -102,6 +106,51 @@ class InterviewService:
             return normalized or None
         except Exception:
             return None
+
+    def _generate_conversation_summary(
+        self,
+        history: list[dict[str, Any]],
+        prev_summary: str | None,
+        config: dict[str, Any],
+    ) -> str | None:
+        if not history:
+            return prev_summary
+
+        ai_service = self._get_ai_service()
+        if ai_service is None:
+            return prev_summary
+
+        turns_text = '\n'.join(
+            f"{'Student' if m['role'] == 'student' else 'Patient'}: {m['text']}"
+            for m in history
+        )
+
+        prev_block = f'Previous summary:\n{prev_summary}\n\n' if prev_summary else ''
+        system_prompt = (
+            'You are a clinical conversation summariser. '
+            'Given a medical student–patient interview transcript, produce a concise running summary '
+            'in the style of a clinical note. Cover: what the student has asked, what the patient '
+            'has revealed (symptoms, timeline, PMH, DH, FH, SH, ROS), and any notable gaps. '
+            'Plain English only, no markdown, maximum 200 words. '
+            'If a previous summary is provided, update it rather than replacing it.'
+        )
+        try:
+            result = ai_service.generate_text(
+                provider=config['textProvider'],
+                system_prompt=system_prompt,
+                messages=[{
+                    'role': 'user',
+                    'content': f'{prev_block}New turns:\n{turns_text}',
+                }],
+                temperature=0.1,
+                model=config.get('textModel'),
+                api_key=config.get('textApiKey'),
+                base_url=config.get('textBaseUrl'),
+            )
+            normalized = self._normalize_summary(result, max_chars=1200)
+            return normalized or prev_summary
+        except Exception:
+            return prev_summary
 
     def _ensure_rag_context(self, state: dict[str, Any], config: dict[str, Any]) -> None:
         if state.get('ragCaseSummary'):
@@ -255,12 +304,16 @@ class InterviewService:
         next_state = deepcopy(state) if state else self.create_initial_state(case_data)
         self._ensure_rag_context(next_state, config)
 
+        # ── Memory: pass only recent window; summary covers earlier turns ──
+        recent_history = history[-RECENT_WINDOW:] if len(history) > RECENT_WINDOW else history
+
         parsed = self.turn_chain.invoke(
             case_data=case_data,
-            history=history,
+            history=recent_history,
             student_input=student_input,
             config=config,
             rag_case_summary=next_state.get('ragCaseSummary'),
+            conversation_summary=next_state.get('conversationSummary'),
         )
         extraction = parsed.extraction.model_dump(by_alias=True) if parsed.extraction else None
 
@@ -273,6 +326,14 @@ class InterviewService:
             next_state['turnsWithoutProgress'] += 1
         self.check_phase_transition(next_state)
         decision = self.evaluate_decision(next_state, case_data)
+
+        # ── Memory: regenerate summary every SUMMARY_INTERVAL turns ──
+        if next_state['turnCount'] % SUMMARY_INTERVAL == 0 and history:
+            next_state['conversationSummary'] = self._generate_conversation_summary(
+                history=history,
+                prev_summary=next_state.get('conversationSummary'),
+                config=config,
+            )
 
         return {
             'patientMessage': {

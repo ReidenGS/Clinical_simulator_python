@@ -23,7 +23,7 @@ Rules:
 """.strip()
 
 
-def build_patient_turn_prompt(case_data: dict, format_instructions: str, rag_case_summary: str | None = None):
+def build_patient_turn_prompt(case_data: dict, format_instructions: str, rag_case_summary: str | None = None, conversation_summary: str | None = None):
     from langchain_core.prompts import ChatPromptTemplate
 
     family_history = case_data['hiddenDetails'].get('familyHistory')
@@ -40,6 +40,15 @@ REAL-WORLD REFERENCE (RAG, de-identified):
   {rag_case_summary}
 - Never copy sentences verbatim.
 - Keep priority order: structured CASE FACTS > diagnosis consistency > RAG reference.
+""".strip()
+
+    memory_context = ''
+    if conversation_summary:
+        memory_context = f"""
+CONVERSATION MEMORY (auto-summary of earlier turns not in the message history below):
+{conversation_summary}
+- Use this to stay consistent. Do NOT re-ask what the patient has already revealed.
+- The recent message history below takes priority over this summary if they conflict.
 """.strip()
 
     # Escape braces in format_instructions so LangChain doesn't treat JSON schema
@@ -63,6 +72,7 @@ CASE FACTS:
 {f'PERSONALITY: {personality}' if personality else ''}
 {f"SPEECH PATTERNS (use these naturally): {', '.join(speech_patterns)}" if speech_patterns else ''}
 {rag_context}
+{memory_context}
 
 STRICT GUIDELINES:
 1. DO NOT volunteer hidden details unless explicitly asked.

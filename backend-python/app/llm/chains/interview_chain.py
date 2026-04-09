@@ -48,11 +48,13 @@ class InterviewTurnChain:
         student_input: str,
         config: dict,
         rag_case_summary: str | None = None,
+        conversation_summary: str | None = None,
     ) -> 'PatientTurnOutput':
         prompt = build_patient_turn_prompt(
             case_data,
             self.parser.get_format_instructions(),
             rag_case_summary=rag_case_summary,
+            conversation_summary=conversation_summary,
         )
         model = self.factory.build_chat_model(
             provider=config['textProvider'],
