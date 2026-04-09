@@ -258,6 +258,66 @@
 1. `python3 -m compileall app` 通过
 2. `python3 -m unittest tests.test_interview_service tests.test_interview_chain_fallback` 通过（7/7）
 
+---
+
+## 8. 更新记录（2026-04-09 13:08 EDT）
+
+### 8.1 新增 Interview RedFlag 检索服务（MVP）
+
+新增文件：
+- `backend-python/app/services/interview_redflag_rag.py`
+
+核心能力：
+1. 支持红旗症状上下文输出：`RedFlagContext(red_flags, source_urls, source_mode)`。
+2. 受控来源在线检索（白名单域名）+ LLM 结构化抽取。
+3. 离线规则兜底与去重合并。
+
+说明：
+- 该服务不是 LangChain agent 自主联网 tool calling；是后端受控检索后再喂给 LLM。
+
+### 8.2 CaseGenerator 接入红旗增强
+
+修改文件：
+- `backend-python/app/services/case_generator_service.py`
+
+新增逻辑：
+1. 初始化 `InterviewRedFlagRagService`。
+2. 生成 case 后执行 `_enrich_red_flags(case_data, config)`：
+   - 合并现有 `redFlags` 与检索到的红旗症状。
+   - 自动补充 `mustAskItems` 的 ROS 红旗筛查问题（`critical: true`）。
+   - 自动将 `critical` 数量补齐到至少 4 项（优先 HPC/ROS/PMH/DH）。
+
+结果：
+- `redFlags` 与 `mustAskItems.critical` 的一致性更强，病例结构更贴近临床安全思维。
+
+### 8.3 按需求切换为“离线优先 + 定期更新离线库”
+
+新增文件：
+- `backend-python/data/redflags_offline.json`
+
+策略调整：
+1. 先匹配离线规则库。
+2. 若匹配成功，直接返回离线结果，不触发联网。
+3. 仅当离线未命中时，才走在线检索 + LLM 提取 + 离线兜底合并。
+
+实现点：
+- `interview_redflag_rag.py` 新增 `_load_offline_rules()`，从 `backend-python/data/redflags_offline.json` 加载规则。
+- 保留内置默认规则（文件缺失/格式错误时回退）。
+
+### 8.4 新增/更新测试
+
+新增测试文件：
+- `backend-python/tests/test_case_generator_redflag_rag.py`
+- `backend-python/tests/test_interview_redflag_rag.py`
+
+测试覆盖：
+1. `CaseGenerator` 会合并 red flags、补齐 critical 下限、补充 ROS 筛查项。
+2. 命中离线规则时短路在线检索（不联网）。
+
+本次执行结果：
+- `PYTHONPATH=. python3 -m unittest tests.test_interview_redflag_rag tests.test_case_generator_redflag_rag tests.test_interview_service -v`
+- 结果：`OK`（7/7）
+
 说明：
 - 新增逻辑未破坏 interview 既有链路与 fallback 测试。
 

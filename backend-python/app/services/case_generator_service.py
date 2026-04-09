@@ -6,6 +6,7 @@ import uuid
 from typing import Any
 
 from app.services.open_patients_rag import OpenPatientsRagService
+from app.services.interview_redflag_rag import InterviewRedFlagRagService
 
 
 _CASE_GENERATION_SYSTEM_PROMPT = """
@@ -70,6 +71,7 @@ class CaseGeneratorService:
 
     def __init__(self) -> None:
         self.rag_service = OpenPatientsRagService()
+        self.redflag_rag = InterviewRedFlagRagService()
 
     def generate_random_case(self, config: dict[str, Any], difficulty: str = 'medium') -> dict[str, Any] | None:
         """Sample a random Open-Patients case and use LLM to generate a full PatientCase."""
@@ -118,7 +120,64 @@ class CaseGeneratorService:
         if case_data.get('difficulty') not in ('easy', 'medium', 'hard'):
             case_data['difficulty'] = difficulty
 
+        self._enrich_red_flags(case_data, config)
+
         return case_data
+
+    def _enrich_red_flags(self, case_data: dict[str, Any], config: dict[str, Any]) -> None:
+        diagnosis_hint = str(case_data.get('correctDiagnosis') or '').strip()
+        if not diagnosis_hint:
+            return
+
+        rag_context = self.redflag_rag.get_red_flag_context(
+            diagnosis_hint=diagnosis_hint,
+            difficulty=str(case_data.get('difficulty') or 'medium'),
+            config=config,
+        )
+
+        existing_red_flags = [str(item).strip() for item in case_data.get('redFlags', []) if str(item).strip()]
+        merged_red_flags = self.redflag_rag._merge_flags(existing_red_flags, rag_context.red_flags)[:6]
+        if merged_red_flags:
+            case_data['redFlags'] = merged_red_flags
+
+        must_ask_items = list(case_data.get('mustAskItems') or [])
+        must_ask_items = self._ensure_red_flag_questions(must_ask_items, merged_red_flags[:3])
+        must_ask_items = self._ensure_critical_floor(must_ask_items, minimum=4)
+        case_data['mustAskItems'] = must_ask_items
+
+    def _ensure_red_flag_questions(self, must_ask_items: list[dict[str, Any]], red_flags: list[str]) -> list[dict[str, Any]]:
+        existing_topics = {
+            self._topic_norm(str(item.get('subItem') or ''))
+            for item in must_ask_items
+        }
+        next_items = list(must_ask_items)
+        for flag in red_flags:
+            norm = self._topic_norm(flag)
+            if not norm:
+                continue
+            if any(norm in existing or existing in norm for existing in existing_topics if existing):
+                continue
+            next_items.append({
+                'dimension': 'ROS',
+                'subItem': f'screen for {flag}',
+                'critical': True,
+                'hint': f'Ask specifically about {flag}.',
+            })
+            existing_topics.add(norm)
+        return next_items
+
+    def _ensure_critical_floor(self, must_ask_items: list[dict[str, Any]], minimum: int) -> list[dict[str, Any]]:
+        need = minimum - sum(1 for item in must_ask_items if item.get('critical'))
+        for item in must_ask_items:
+            if need <= 0:
+                break
+            if not item.get('critical') and item.get('dimension') in {'HPC', 'ROS', 'PMH', 'DH'}:
+                item['critical'] = True
+                need -= 1
+        return must_ask_items
+
+    def _topic_norm(self, text: str) -> str:
+        return re.sub(r'[^a-z0-9 ]', '', text.lower()).strip()
 
     def _parse_case_json(self, raw: str) -> dict[str, Any] | None:
         # Strip markdown fences if present

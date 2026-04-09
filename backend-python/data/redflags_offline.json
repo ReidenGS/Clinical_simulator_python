@@ -1,0 +1,57 @@
+{
+  "acute coronary syndrome": [
+    "central chest pain lasting >15 minutes",
+    "pain radiating to arm, jaw, or back",
+    "shortness of breath at rest",
+    "syncope or near-syncope",
+    "cold sweat with persistent chest discomfort"
+  ],
+  "myocardial infarction": [
+    "persistent crushing chest pain",
+    "diaphoresis with nausea",
+    "hemodynamic instability or collapse",
+    "new severe dyspnea"
+  ],
+  "pulmonary embolism": [
+    "sudden pleuritic chest pain",
+    "acute dyspnea",
+    "hemoptysis",
+    "syncope",
+    "new unilateral leg swelling"
+  ],
+  "stroke": [
+    "sudden facial droop",
+    "sudden arm or leg weakness",
+    "new speech disturbance",
+    "sudden severe headache",
+    "new visual loss"
+  ],
+  "sepsis": [
+    "confusion or altered mental status",
+    "very fast breathing",
+    "systolic blood pressure < 90 mmHg",
+    "reduced urine output",
+    "mottled or cold peripheries"
+  ],
+  "asthma": [
+    "unable to speak full sentences",
+    "silent chest",
+    "cyanosis",
+    "drowsiness or exhaustion",
+    "poor response to rescue inhaler"
+  ],
+  "copd exacerbation": [
+    "severe breathlessness at rest",
+    "new cyanosis",
+    "confusion or drowsiness",
+    "inability to complete sentences",
+    "reduced consciousness"
+  ],
+  "pneumonia": [
+    "respiratory distress",
+    "confusion in older adults",
+    "oxygen saturation persistently low",
+    "hypotension or signs of sepsis",
+    "hemoptysis"
+  ]
+}
