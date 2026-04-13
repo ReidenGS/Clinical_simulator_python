@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,14 @@ class RedFlagContext:
     red_flags: list[str]
     source_urls: list[str]
     source_mode: str
+
+
+@dataclass(frozen=True)
+class _VectorEntry:
+    diagnosis_key: str
+    flags: list[str]
+    weights: dict[str, float]
+    norm: float
 
 
 class InterviewRedFlagRagService:
@@ -37,10 +46,46 @@ class InterviewRedFlagRagService:
         'copd exacerbation': ['severe breathlessness at rest', 'new cyanosis', 'confusion or drowsiness', 'inability to complete sentences', 'reduced consciousness'],
         'pneumonia': ['respiratory distress', 'confusion in older adults', 'oxygen saturation persistently low', 'hypotension or signs of sepsis', 'hemoptysis'],
     }
+    _QUERY_ALIASES: dict[str, tuple[str, ...]] = {
+        # Coronary / ACS
+        'heart attack': ('myocardial infarction', 'acute coronary syndrome'),
+        'mi': ('myocardial infarction',),
+        'stemi': ('myocardial infarction', 'acute coronary syndrome'),
+        'nstemi': ('myocardial infarction', 'acute coronary syndrome'),
+        'acs': ('acute coronary syndrome',),
+        'angina': ('acute coronary syndrome',),
+        # Pulmonary embolism / DVT
+        'blood clot in lung': ('pulmonary embolism',),
+        'lung clot': ('pulmonary embolism',),
+        'pe': ('pulmonary embolism',),
+        'dvt': ('pulmonary embolism',),
+        # Stroke / TIA
+        'brain attack': ('stroke',),
+        'cva': ('stroke',),
+        'tia': ('stroke',),
+        'transient ischaemic attack': ('stroke',),
+        'transient ischemic attack': ('stroke',),
+        # Respiratory
+        'lung infection': ('pneumonia',),
+        'chest infection': ('pneumonia',),
+        'breathlessness': ('asthma', 'copd exacerbation'),
+        'sob': ('asthma', 'copd exacerbation'),
+        'shortness of breath': ('asthma', 'copd exacerbation'),
+        'chronic obstructive': ('copd exacerbation',),
+        # Sepsis
+        'systemic infection': ('sepsis',),
+        'bacteremia': ('sepsis',),
+        'bacteraemia': ('sepsis',),
+        'blood poisoning': ('sepsis',),
+        'septicaemia': ('sepsis',),
+        'septicemia': ('sepsis',),
+    }
+    _VECTOR_SCORE_THRESHOLD = 0.12
 
     def __init__(self) -> None:
         self.ai_service = self._build_ai_service()
         self.offline_rules = self._load_offline_rules()
+        self._vector_index, self._idf = self._build_vector_index()
 
     def _build_ai_service(self):
         try:
@@ -56,6 +101,14 @@ class InterviewRedFlagRagService:
                 red_flags=offline[:6],
                 source_urls=[],
                 source_mode='offline',
+            )
+
+        vector_flags, vector_matched = self._vector_red_flags(diagnosis_hint)
+        if vector_matched:
+            return RedFlagContext(
+                red_flags=vector_flags[:6],
+                source_urls=[],
+                source_mode='vector_offline',
             )
 
         # Fallback path: only when offline rules have no diagnosis match.
@@ -94,6 +147,88 @@ class InterviewRedFlagRagService:
             if normalized and (key in normalized or normalized in key):
                 return (list(flags), True)
         return (self._GENERIC_FLAGS, False)
+
+    def _build_vector_index(self) -> tuple[list[_VectorEntry], dict[str, float]]:
+        docs: list[tuple[str, list[str], list[str]]] = []
+        df: dict[str, int] = {}
+        for key, flags in self.offline_rules.items():
+            doc_text = f'{key} ' + ' '.join(flags)
+            tokens = self._tokenize(doc_text)
+            if not tokens:
+                continue
+            docs.append((key, flags, tokens))
+            for token in set(tokens):
+                df[token] = df.get(token, 0) + 1
+
+        total_docs = max(1, len(docs))
+        idf = {token: math.log(1 + (total_docs / (1 + freq))) + 1 for token, freq in df.items()}
+
+        entries: list[_VectorEntry] = []
+        for key, flags, tokens in docs:
+            tf: dict[str, float] = {}
+            for token in tokens:
+                tf[token] = tf.get(token, 0.0) + 1.0
+            max_tf = max(tf.values()) if tf else 1.0
+            weights = {token: (count / max_tf) * idf.get(token, 1.0) for token, count in tf.items()}
+            norm = math.sqrt(sum(weight * weight for weight in weights.values()))
+            entries.append(
+                _VectorEntry(
+                    diagnosis_key=key,
+                    flags=list(flags),
+                    weights=weights,
+                    norm=norm,
+                )
+            )
+        return entries, idf
+
+    def _expand_query_text(self, diagnosis_hint: str) -> str:
+        lowered = diagnosis_hint.strip().lower()
+        expansions: list[str] = []
+        for phrase, alias_targets in self._QUERY_ALIASES.items():
+            if phrase in lowered:
+                expansions.extend(alias_targets)
+        if not expansions:
+            return diagnosis_hint
+        return f"{diagnosis_hint} {' '.join(expansions)}"
+
+    def _vector_red_flags(self, diagnosis_hint: str) -> tuple[list[str], bool]:
+        query = self._expand_query_text(diagnosis_hint)
+        q_tokens = self._tokenize(query)
+        if not q_tokens or not self._vector_index:
+            return ([], False)
+
+        # Build query TF-IDF vector (same scheme as document vectors)
+        q_tf: dict[str, float] = {}
+        for token in q_tokens:
+            q_tf[token] = q_tf.get(token, 0.0) + 1.0
+        q_max_tf = max(q_tf.values()) if q_tf else 1.0
+        q_weights = {
+            token: (count / q_max_tf) * self._idf.get(token, 1.0)
+            for token, count in q_tf.items()
+        }
+        q_norm = math.sqrt(sum(w * w for w in q_weights.values()))
+        if q_norm <= 0:
+            return ([], False)
+
+        best_score = 0.0
+        best: _VectorEntry | None = None
+        for entry in self._vector_index:
+            if entry.norm <= 0:
+                continue
+            dot = sum(q_weights.get(token, 0.0) * entry.weights.get(token, 0.0) for token in q_weights)
+            score = dot / (q_norm * entry.norm)
+            if score > best_score:
+                best_score = score
+                best = entry
+
+        if best is None or best_score < self._VECTOR_SCORE_THRESHOLD:
+            return ([], False)
+        return (best.flags, True)
+
+    def _tokenize(self, text: str) -> list[str]:
+        normalized = re.sub(r'[^a-z0-9 ]+', ' ', text.lower())
+        tokens = [tok for tok in normalized.split() if len(tok) >= 2]
+        return tokens
 
     def _load_offline_rules(self) -> dict[str, list[str]]:
         path = Path(__file__).resolve().parents[2] / 'data' / 'redflags_offline.json'
