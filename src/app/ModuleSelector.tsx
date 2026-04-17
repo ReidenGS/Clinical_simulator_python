@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { MessageSquare, ChevronRight, Heart, Clock, Zap, Play, Stethoscope, Activity, FileText } from 'lucide-react';
+import { MessageSquare, ChevronRight, Heart, Clock, Zap, Play, Stethoscope, Activity, FileText, Trash2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import type { TrainingModuleDefinition } from '../platform/types';
-import { getRecentSessions, type SessionSummary } from '../platform/storage/sessionStore';
+import { getRecentSessions, removeSessionResult, type SessionSummary } from '../platform/storage/sessionStore';
 
 interface ModuleSelectorProps {
   modules: TrainingModuleDefinition[];
@@ -103,6 +103,19 @@ export default function ModuleSelector({ modules, onSelectModule, onGuidedStart 
   useEffect(() => {
     setRecentSessions(getRecentSessions(3));
   }, []);
+
+  const handleDeleteSession = (entryId: string) => {
+    const removed = removeSessionResult(entryId);
+    setRecentSessions(getRecentSessions(3));
+
+    if (removed?.module === 'INTERVIEW' && removed.sessionId) {
+      void fetch('/api/interview/session/' + encodeURIComponent(removed.sessionId), {
+        method: 'DELETE',
+      }).catch(() => {
+        // Fire-and-forget cleanup; no user-facing error needed.
+      });
+    }
+  };
 
   return (
     <div className="lg:col-span-12 w-full flex flex-col items-center gap-8 pt-2 pb-8 lg:gap-10 lg:pt-4 lg:pb-10">
@@ -274,30 +287,42 @@ export default function ModuleSelector({ modules, onSelectModule, onGuidedStart 
             {recentSessions.length > 0 ? (
               <div className="grid gap-3 lg:grid-cols-3 md:grid-cols-2">
                 {recentSessions.map((s) => (
-                  <button
+                  <div
                     key={s.id}
-                    onClick={() => onSelectModule(s.module)}
                     className="group flex items-center gap-3 rounded-xl border border-[#141414]/10 p-3 text-left transition-all hover:border-[#141414]/30 hover:shadow-[4px_4px_0px_0px_rgba(20,20,20,0.08)]"
                   >
-                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-                      s.module === 'INTERVIEW' ? 'bg-[#0d9488]' : 'bg-red-500'
-                    }`}>
-                      {s.module === 'INTERVIEW'
-                        ? <MessageSquare className="w-4 h-4 text-white" />
-                        : <Heart className="w-4 h-4 text-white" />
-                      }
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold truncate leading-tight">{s.caseOrScenarioName}</p>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-[9px] font-mono uppercase opacity-45">{s.module === 'INTERVIEW' ? 'Interview' : 'CPR'}</span>
-                        <span className="text-[9px] font-mono opacity-35">{formatDate(s.timestamp)}</span>
+                    <button
+                      onClick={() => onSelectModule(s.module)}
+                      className="flex flex-1 items-center gap-3 min-w-0"
+                    >
+                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
+                        s.module === 'INTERVIEW' ? 'bg-[#0d9488]' : 'bg-red-500'
+                      }`}>
+                        {s.module === 'INTERVIEW'
+                          ? <MessageSquare className="w-4 h-4 text-white" />
+                          : <Heart className="w-4 h-4 text-white" />
+                        }
                       </div>
-                    </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold truncate leading-tight">{s.caseOrScenarioName}</p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[9px] font-mono uppercase opacity-45">{s.module === 'INTERVIEW' ? 'Interview' : 'CPR'}</span>
+                          <span className="text-[9px] font-mono opacity-35">{formatDate(s.timestamp)}</span>
+                        </div>
+                      </div>
+                    </button>
                     <div className={`text-lg font-bold shrink-0 ${
                       s.score >= 80 ? 'text-emerald-600' : s.score >= 60 ? 'text-amber-600' : 'text-red-600'
                     }`}>{s.score}</div>
-                  </button>
+                    <button
+                      onClick={() => handleDeleteSession(s.id)}
+                      className="shrink-0 rounded-lg border border-[#141414]/15 p-1.5 text-[#141414]/50 hover:text-red-600 hover:border-red-300"
+                      aria-label="Delete session"
+                      title="Delete session"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 ))}
               </div>
             ) : (

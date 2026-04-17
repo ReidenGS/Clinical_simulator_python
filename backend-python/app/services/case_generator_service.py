@@ -136,7 +136,8 @@ class CaseGeneratorService:
         )
 
         existing_red_flags = [str(item).strip() for item in case_data.get('redFlags', []) if str(item).strip()]
-        merged_red_flags = self.redflag_rag._merge_flags(existing_red_flags, rag_context.red_flags)[:6]
+        merge_fn = getattr(self.redflag_rag, '_merge_flags', self._merge_flags)
+        merged_red_flags = merge_fn(existing_red_flags, rag_context.red_flags)[:6]
         if merged_red_flags:
             case_data['redFlags'] = merged_red_flags
 
@@ -175,6 +176,17 @@ class CaseGeneratorService:
                 item['critical'] = True
                 need -= 1
         return must_ask_items
+
+    def _merge_flags(self, primary: list[str], secondary: list[str]) -> list[str]:
+        merged: list[str] = []
+        seen: set[str] = set()
+        for item in [*primary, *secondary]:
+            norm = self._topic_norm(str(item))
+            if not norm or norm in seen:
+                continue
+            seen.add(norm)
+            merged.append(str(item).strip())
+        return merged
 
     def _topic_norm(self, text: str) -> str:
         return re.sub(r'[^a-z0-9 ]', '', text.lower()).strip()

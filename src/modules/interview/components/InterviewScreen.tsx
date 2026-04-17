@@ -206,6 +206,7 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
           currentCase.name,
           result.rubricResult.weightedTotal,
           `${result.feedbackReport.competencyLevel} - ${currentCase.name}`,
+          session.sessionState?.sessionId ?? undefined,
         );
       } else if (ENABLE_LEGACY_INTERVIEW_EVALUATION) {
         const { evaluateInterview } = await import('../legacy/services/interviewAiService');

@@ -58,6 +58,7 @@ export interface SessionSummary {
   score: number;
   headline: string;
   caseOrScenarioName: string;
+  sessionId?: string;
 }
 
 export function getRecentSessions(limit: number = 5): SessionSummary[] {
@@ -72,6 +73,7 @@ export function saveInterviewResult(
   caseOrScenarioName: string,
   score: number,
   headline: string,
+  sessionId?: string,
 ): void {
   const entry: SessionSummary = {
     id: `interview_${Date.now()}`,
@@ -80,6 +82,7 @@ export function saveInterviewResult(
     score,
     headline,
     caseOrScenarioName,
+    sessionId,
   };
   saveToStorage(TRAINING_HISTORY_KEY, entry);
 }
@@ -98,4 +101,15 @@ export function saveCprResult(
     caseOrScenarioName,
   };
   saveToStorage(TRAINING_HISTORY_KEY, entry);
+}
+
+export function removeSessionResult(entryId: string): SessionSummary | null {
+  const all = loadFromStorage<SessionSummary[]>(TRAINING_HISTORY_KEY);
+  if (!all || !Array.isArray(all)) return null;
+  const idx = all.findIndex((item) => item.id === entryId);
+  if (idx < 0) return null;
+
+  const [removed] = all.splice(idx, 1);
+  localStorage.setItem(TRAINING_HISTORY_KEY, JSON.stringify(all));
+  return removed ?? null;
 }

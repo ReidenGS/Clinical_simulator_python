@@ -29,6 +29,10 @@ __pycache__/
 # Project-specific
 .superset/
 .playwright-mcp/
+.claude/
+.codex/
+venv/
+data/
 
 # Binary / large files
 *.pdf

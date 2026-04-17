@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote_plus
 
+from app.tools import build_redflag_tools
+
 
 @dataclass(frozen=True)
 class RedFlagContext:
@@ -26,6 +28,11 @@ class _VectorEntry:
 
 class InterviewRedFlagRagService:
     """Offline-first red flag retrieval with controlled web fallback."""
+
+    _OFFLINE_TOOL_NAME = 'offline_red_flag_lookup'
+    _WEB_TOOL_NAME = 'web_red_flag_search'
+    _SELF_CONFIDENCE_THRESHOLD = 0.75
+    _SELF_MIN_FLAGS = 3
 
     _ALLOWED_DOMAINS = (
         'nhs.uk',
@@ -86,6 +93,7 @@ class InterviewRedFlagRagService:
         self.ai_service = self._build_ai_service()
         self.offline_rules = self._load_offline_rules()
         self._vector_index, self._idf = self._build_vector_index()
+        self._tool_registry = self._build_tool_registry()
 
     def _build_ai_service(self):
         try:
@@ -94,43 +102,75 @@ class InterviewRedFlagRagService:
             return None
         return AIService()
 
+    def _build_tool_registry(self) -> dict[str, Any]:
+        return build_redflag_tools(
+            offline_lookup=self._tool_offline_lookup,
+            web_lookup=self._tool_web_lookup,
+        )
+
     def get_red_flag_context(self, diagnosis_hint: str, difficulty: str, config: dict[str, Any]) -> RedFlagContext:
-        offline, matched = self._offline_red_flags(diagnosis_hint)
-        if matched:
+        self_assessment = self._self_assess_with_llm(diagnosis_hint, difficulty, config)
+        llm_self_flags = self._merge_flags(self_assessment.get('red_flags', []), [])
+        self_confidence = float(self_assessment.get('confidence', 0.0) or 0.0)
+        need_external = bool(self_assessment.get('need_external', True))
+
+        if llm_self_flags and not need_external and (
+            self_confidence >= self._SELF_CONFIDENCE_THRESHOLD or len(llm_self_flags) >= self._SELF_MIN_FLAGS
+        ):
             return RedFlagContext(
-                red_flags=offline[:6],
+                red_flags=llm_self_flags[:6],
                 source_urls=[],
-                source_mode='offline',
+                source_mode='llm_self',
             )
 
-        vector_flags, vector_matched = self._vector_red_flags(diagnosis_hint)
-        if vector_matched:
+        offline_result = self._invoke_tool_via_llm(
+            tool_name=self._OFFLINE_TOOL_NAME,
+            payload={'diagnosis_hint': diagnosis_hint},
+            config=config,
+        )
+        offline_flags = self._merge_flags(llm_self_flags, offline_result.get('red_flags', []))
+
+        if bool(offline_result.get('matched')):
             return RedFlagContext(
-                red_flags=vector_flags[:6],
+                red_flags=offline_flags[:6],
                 source_urls=[],
-                source_mode='vector_offline',
+                source_mode='offline' if not llm_self_flags else 'llm+offline',
+            )
+        if bool(offline_result.get('vector_matched')):
+            return RedFlagContext(
+                red_flags=offline_flags[:6],
+                source_urls=[],
+                source_mode='vector_offline' if not llm_self_flags else 'llm+vector_offline',
             )
 
-        # Fallback path: only when offline rules have no diagnosis match.
-        snippets = self._search_snippets(diagnosis_hint)
+        web_result = self._invoke_tool_via_llm(
+            tool_name=self._WEB_TOOL_NAME,
+            payload={
+                'diagnosis_hint': diagnosis_hint,
+                'difficulty': difficulty,
+                'provider': str(config.get('textProvider', '')),
+                'model': str(config.get('textModel', '') or ''),
+                'api_key': str(config.get('textApiKey', '') or ''),
+                'base_url': str(config.get('textBaseUrl', '') or ''),
+            },
+            config=config,
+        )
+        merged = self._merge_flags(offline_flags, web_result.get('red_flags', []))
+        source_urls = [str(url) for url in web_result.get('source_urls', []) if str(url).strip()][:5]
 
-        llm_flags: list[str] = []
-        if snippets:
-            llm_flags = self._extract_with_llm(snippets, diagnosis_hint, difficulty, config)
-
-        merged = self._merge_flags(llm_flags, offline)
-        source_urls = [row['url'] for row in snippets if row.get('url')]
-
-        if llm_flags and source_urls:
+        if web_result.get('red_flags') and source_urls:
             mode = 'web+offline'
         elif source_urls:
             mode = 'web'
         else:
             mode = 'offline'
 
+        if not merged:
+            merged = list(self._GENERIC_FLAGS)
+
         return RedFlagContext(
             red_flags=merged[:6],
-            source_urls=source_urls[:5],
+            source_urls=source_urls,
             source_mode=mode,
         )
 
@@ -140,6 +180,151 @@ class InterviewRedFlagRagService:
         'persistent severe pain unrelieved by rest',
         'shortness of breath at rest',
     ]
+
+    def _self_assess_with_llm(self, diagnosis_hint: str, difficulty: str, config: dict[str, Any]) -> dict[str, Any]:
+        if self.ai_service is None:
+            return {'red_flags': [], 'confidence': 0.0, 'need_external': True}
+
+        provider = str(config.get('textProvider', '')).strip()
+        if not provider:
+            return {'red_flags': [], 'confidence': 0.0, 'need_external': True}
+
+        system_prompt = (
+            'You are a clinical safety reviewer. '
+            'Infer likely urgent red-flag symptoms from diagnosis hint only. '
+            'Return JSON only with keys: redFlags (array of short phrases), confidence (0-1), needExternal (boolean).'
+        )
+        user_payload = {
+            'diagnosisHint': diagnosis_hint,
+            'difficulty': difficulty,
+            'constraints': {
+                'maxItems': 6,
+                'minItems': 0,
+                'style': 'symptom phrase only',
+            },
+        }
+
+        try:
+            raw = self.ai_service.generate_json(
+                provider=provider,
+                system_prompt=system_prompt,
+                messages=[{'role': 'user', 'content': json.dumps(user_payload, ensure_ascii=False)}],
+                temperature=0.0,
+                model=config.get('textModel'),
+                api_key=config.get('textApiKey'),
+                base_url=config.get('textBaseUrl'),
+            )
+            parsed = json.loads(raw)
+            return {
+                'red_flags': self._clean_red_flags(parsed.get('redFlags')),
+                'confidence': self._coerce_confidence(parsed.get('confidence')),
+                'need_external': bool(parsed.get('needExternal', True)),
+            }
+        except Exception:
+            return {'red_flags': [], 'confidence': 0.0, 'need_external': True}
+
+    def _tool_offline_lookup(self, diagnosis_hint: str) -> dict[str, Any]:
+        offline_flags, matched = self._offline_red_flags(diagnosis_hint)
+        vector_flags: list[str] = []
+        vector_matched = False
+        if not matched:
+            vector_flags, vector_matched = self._vector_red_flags(diagnosis_hint)
+        red_flags = offline_flags if matched else (vector_flags if vector_matched else [])
+        return {
+            'red_flags': red_flags[:6],
+            'source_urls': [],
+            'matched': matched,
+            'vector_matched': vector_matched,
+        }
+
+    def _tool_web_lookup(self, diagnosis_hint: str, difficulty: str, config: dict[str, Any]) -> dict[str, Any]:
+        snippets = self._search_snippets(diagnosis_hint)
+
+        llm_flags: list[str] = []
+        if snippets:
+            llm_flags = self._extract_with_llm(snippets, diagnosis_hint, difficulty, config)
+
+        return {
+            'red_flags': self._clean_red_flags(llm_flags)[:6],
+            'source_urls': [row['url'] for row in snippets if row.get('url')][:5],
+            'matched': bool(llm_flags),
+            'vector_matched': False,
+        }
+
+    def _invoke_tool_via_llm(self, tool_name: str, payload: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+        tool = self._tool_registry.get(tool_name)
+        if tool is None:
+            return self._invoke_tool_direct(tool_name, payload)
+
+        if self.ai_service is None:
+            return self._invoke_tool_direct(tool_name, payload)
+
+        provider = str(config.get('textProvider', '')).strip()
+        if not provider:
+            return self._invoke_tool_direct(tool_name, payload)
+
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+        except Exception:
+            return self._invoke_tool_direct(tool_name, payload)
+
+        try:
+            chat_model = self.ai_service.factory.build_chat_model(
+                provider=provider,
+                temperature=0.0,
+                model=config.get('textModel'),
+                api_key=config.get('textApiKey'),
+                base_url=config.get('textBaseUrl'),
+            )
+            bound = chat_model.bind_tools([tool])
+            response = bound.invoke([
+                SystemMessage(content='Call the provided tool exactly once with the JSON payload from the user message.'),
+                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+            ])
+            tool_calls = getattr(response, 'tool_calls', None) or []
+            if not tool_calls:
+                return self._invoke_tool_direct(tool_name, payload)
+            args = tool_calls[0].get('args')
+            if not isinstance(args, dict):
+                return self._invoke_tool_direct(tool_name, payload)
+            return self._invoke_tool_direct(tool_name, args)
+        except Exception:
+            return self._invoke_tool_direct(tool_name, payload)
+
+    def _invoke_tool_direct(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        tool = self._tool_registry.get(tool_name)
+        if tool is None:
+            return {}
+        try:
+            raw = tool.invoke(payload)
+        except Exception:
+            return {}
+
+        if not isinstance(raw, dict):
+            return {}
+        return {
+            'red_flags': self._clean_red_flags(raw.get('red_flags')),
+            'source_urls': [str(url) for url in raw.get('source_urls', []) if str(url).strip()],
+            'matched': bool(raw.get('matched', False)),
+            'vector_matched': bool(raw.get('vector_matched', False)),
+        }
+
+    def _coerce_confidence(self, value: Any) -> float:
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return min(1.0, max(0.0, score))
+
+    def _clean_red_flags(self, red_flags: Any) -> list[str]:
+        if not isinstance(red_flags, list):
+            return []
+        cleaned: list[str] = []
+        for item in red_flags:
+            text = re.sub(r'\s+', ' ', str(item or '')).strip()
+            if text:
+                cleaned.append(text[:120])
+        return cleaned[:6]
 
     def _offline_red_flags(self, diagnosis_hint: str) -> tuple[list[str], bool]:
         normalized = diagnosis_hint.strip().lower()
@@ -182,10 +367,15 @@ class InterviewRedFlagRagService:
         return entries, idf
 
     def _expand_query_text(self, diagnosis_hint: str) -> str:
-        lowered = diagnosis_hint.strip().lower()
+        lowered = re.sub(r'[^a-z0-9 ]+', ' ', diagnosis_hint.strip().lower())
+        token_set = set(lowered.split())
         expansions: list[str] = []
         for phrase, alias_targets in self._QUERY_ALIASES.items():
-            if phrase in lowered:
+            if ' ' in phrase:
+                if re.search(rf'\\b{re.escape(phrase)}\\b', lowered):
+                    expansions.extend(alias_targets)
+                continue
+            if phrase in token_set:
                 expansions.extend(alias_targets)
         if not expansions:
             return diagnosis_hint
@@ -326,15 +516,7 @@ class InterviewRedFlagRagService:
                 base_url=config.get('textBaseUrl'),
             )
             parsed = json.loads(raw)
-            red_flags = parsed.get('redFlags')
-            if not isinstance(red_flags, list):
-                return []
-            cleaned: list[str] = []
-            for item in red_flags:
-                text = re.sub(r'\s+', ' ', str(item or '')).strip()
-                if text:
-                    cleaned.append(text[:120])
-            return cleaned[:6]
+            return self._clean_red_flags(parsed.get('redFlags'))
         except Exception:
             return []
 
