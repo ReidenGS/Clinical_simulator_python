@@ -118,11 +118,18 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
     setFeedbackReport(null);
   };
 
+  useEffect(() => {
+    if (session.turnError) {
+      setWarningMessage(`Backend error: ${session.turnError}`);
+    }
+  }, [session.turnError]);
+
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputText.trim() || !currentCase || session.isLoading) return;
     const text = inputText;
     setInputText('');
+    setWarningMessage(null);
     await session.processTurn(text, aiConfig, USE_NEW_ORCHESTRATION);
   };
 
@@ -218,7 +225,7 @@ export default function InterviewScreen({ aiConfig, onBack, registerGlobalBackHa
           `Score ${result.score} - ${currentCase.name}`,
         );
       } else {
-        throw new Error('Legacy interview evaluation is disabled; backend evaluation is required.');
+        throw new Error('No session data found. Please make sure the backend is reachable and have a conversation with the patient before submitting.');
       }
       setStatus(InterviewStatus.COMPLETED);
     } catch (error) {

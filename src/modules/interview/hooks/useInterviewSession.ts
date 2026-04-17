@@ -18,6 +18,7 @@ interface UseInterviewSessionReturn {
   sessionState: SessionState | null;
   isLoading: boolean;
   lastDecision: Decision | null;
+  turnError: string | null;
   startSession: (caseData: PatientCase) => void;
   processTurn: (input: string, config: AIConfig, useNewOrchestration: boolean) => Promise<void>;
   evaluateSubmission: () => Decision | null;
@@ -72,6 +73,7 @@ export function useInterviewSession(): UseInterviewSessionReturn {
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [lastDecision, setLastDecision] = useState<Decision | null>(null);
+  const [turnError, setTurnError] = useState<string | null>(null);
   const caseRef = useRef<PatientCase | null>(null);
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
@@ -97,6 +99,7 @@ export function useInterviewSession(): UseInterviewSessionReturn {
     const speechService = new SpeechService(config);
     const voiceContext = toVoiceContext(caseRef.current);
 
+    setTurnError(null);
     try {
       if (useNewOrchestration && caseRef.current) {
         // Python backend orchestration path
@@ -139,6 +142,8 @@ export function useInterviewSession(): UseInterviewSessionReturn {
       }
     } catch (error) {
       console.error("Failed to get patient response:", error);
+      const msg = error instanceof Error ? error.message : 'Unknown error';
+      setTurnError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -160,6 +165,7 @@ export function useInterviewSession(): UseInterviewSessionReturn {
     setMessages([]);
     setSessionState(null);
     setLastDecision(null);
+    setTurnError(null);
     caseRef.current = null;
   }, []);
 
@@ -168,6 +174,7 @@ export function useInterviewSession(): UseInterviewSessionReturn {
     sessionState,
     isLoading,
     lastDecision,
+    turnError,
     startSession,
     processTurn,
     evaluateSubmission,
