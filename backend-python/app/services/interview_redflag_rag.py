@@ -372,7 +372,7 @@ class InterviewRedFlagRagService:
         expansions: list[str] = []
         for phrase, alias_targets in self._QUERY_ALIASES.items():
             if ' ' in phrase:
-                if re.search(rf'\\b{re.escape(phrase)}\\b', lowered):
+                if re.search(rf'\b{re.escape(phrase)}\b', lowered):
                     expansions.extend(alias_targets)
                 continue
             if phrase in token_set:
@@ -404,6 +404,9 @@ class InterviewRedFlagRagService:
         best: _VectorEntry | None = None
         for entry in self._vector_index:
             if entry.norm <= 0:
+                continue
+            overlap_tokens = sum(1 for token in q_weights if token in entry.weights)
+            if overlap_tokens < 2:
                 continue
             dot = sum(q_weights.get(token, 0.0) * entry.weights.get(token, 0.0) for token in q_weights)
             score = dot / (q_norm * entry.norm)

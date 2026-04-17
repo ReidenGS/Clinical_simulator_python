@@ -1,5 +1,13 @@
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
+fastapi==0.116.1
+uvicorn[standard]==0.35.0
 python-multipart==0.0.9
 httpx==0.28.1
+python-dotenv==1.1.1
+pydantic==2.11.7
+openai==1.99.9
 google-genai==1.45.0
+langchain==0.3.27
+langchain-core==0.3.74
+langchain-openai==0.3.28
+langchain-google-genai==2.1.9
+datasets==4.1.1
