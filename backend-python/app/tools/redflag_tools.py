@@ -47,6 +47,7 @@ def build_redflag_tools(
 
     @tool('offline_red_flag_lookup')
     def offline_red_flag_lookup(diagnosis_hint: str) -> dict[str, Any]:
+        """Look up red flag symptoms for a given diagnosis hint using the offline dataset."""
         return offline_lookup(diagnosis_hint)
 
     @tool('web_red_flag_search')
@@ -58,6 +59,7 @@ def build_redflag_tools(
         api_key: str = '',
         base_url: str = '',
     ) -> dict[str, Any]:
+        """Search for red flag symptoms for a given diagnosis hint using a web-based LLM."""
         return web_lookup(
             diagnosis_hint=diagnosis_hint,
             difficulty=difficulty,
