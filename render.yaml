@@ -3,7 +3,7 @@ services:
     name: clinical-simulator
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt && npm install && npm run build
+    buildCommand: pip install -r requirements.txt && npm install && npm run build && python scripts/download_data.py
     startCommand: cd backend-python && python3 -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
